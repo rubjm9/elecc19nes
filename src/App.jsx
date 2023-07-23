@@ -3,8 +3,9 @@ import './App.css';
 
 
 function App() {
-  
-  const votantes = [
+
+//AGREGAR VOTANTE
+const [votantesData, setVotantesData] = useState( [
     {
       "name": "Anis",
       "votes": 0
@@ -41,9 +42,8 @@ function App() {
       "name": "Mayca",
       "votes": 0
     }
-  ];
+  ]);
    
-  const [votantesData, setVotantesData] = useState(votantes);
 
   function plusOne(name) {
     setVotantesData(prevVotantes => {
@@ -56,13 +56,27 @@ function App() {
     });
   }
   
-  function addVoter(name) {
-    setVotantesData(prevVotantes => {
-      return prevVotantes.map(votante =>{
-        return { ...votante, name: votante.name };
-        return votante;
+  const [votos, setVotos] = useState(0);
+  const [newCandidate, setNewCandidate] = useState('')
+
+  function handleInputChange(event) {
+    setNewCandidate(event.target.value);
+  }
+  
+  function addNewCandidate(event) {
+    event.preventDefault();
+    if (newCandidate.trim() !== '') {
+      setVotantesData(prevVotantes => {
+        return [
+          ...prevVotantes,
+          {
+            name: newCandidate,
+            votes: 0,
+          }
+        ];
       });
-    });
+      setNewCandidate('');
+    }
   }
 
   useEffect( () => {
@@ -84,31 +98,27 @@ function App() {
                   value={votante.name} 
                   onClick={() => plusOne(votante.name) } 
                 />
-                {votante.name}, {votante.votes} votos.
+                {votante.name}, {votante.votes} votos
               </label>
           ))}
       </div>
 
       <form>
-        <input type="text">
-
-        </input>
-        <button type="submit" className="btn" >Agregar</button>
+        <input 
+          type="text"
+          value={newCandidate}
+          onChange={handleInputChange}
+          placeholder="Introduzca el nombre"
+          />
+        <button 
+          type="button" 
+          className="btn"
+          onClick={addNewCandidate} 
+        >Agregar</button>
       </form>
     </>
   )
 }
 
-/*
-rules_version = '2';
-
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
-    }
-  }
-}
-*/
 
 export default App
