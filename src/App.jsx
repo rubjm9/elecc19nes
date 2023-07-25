@@ -1,49 +1,19 @@
-import { useState, useEffect } from 'react';
 import './App.css';
-
+import db from "./firebase";
+import { useState, useEffect } from 'react';
+import { onSnapshot, collection } from '@firebase/firestore';
 
 function App() {
 
-//AGREGAR VOTANTE
-const [votantesData, setVotantesData] = useState( [
-    {
-      "name": "Anis",
-      "votes": 0
-    },
-    {
-      "name": "Ancor",
-      "votes": 0
-    },
-    {
-      "name": "Glòria",
-      "votes": 0
-    },
-    {
-      "name": "Sergio",
-      "votes": 0
-    },
-    {
-      "name": "Somhairle",
-      "votes": 0
-    },
-    {
-      "name": "Óscar",
-      "votes": 0
-    },
-    {
-      "name": "Rubén",
-      "votes": 0
-    },
-    {
-      "name": "Virginia",
-      "votes": 0
-    },
-    {
-      "name": "Mayca",
-      "votes": 0
-    }
-  ]);
-   
+  const [votantesData, setVotantesData] = useState([]);
+  
+  useEffect(
+    () => 
+      onSnapshot(collection(db, "votantes"),(snapshot) =>
+       setVotantesData(snapshot.docs.map((doc) => doc.data()))
+    ),
+  []);
+
 
   function plusOne(name) {
     setVotantesData(prevVotantes => {
@@ -89,32 +59,37 @@ const [votantesData, setVotantesData] = useState( [
       <h2>Vota a un delegado como coordinador de la Convención:</h2>
       
       <div id="votacion">
-          {votantesData.map( (votante, index) => (
-              <label key={index} className="opcion" >
-                <input 
-                  type="radio" 
-                  name="opcion" 
-                  id={"opcion" + index } 
-                  value={votante.name} 
-                  onClick={() => plusOne(votante.name) } 
-                />
-                {votante.name}, {votante.votes} votos
-              </label>
-          ))}
+        {votantesData.map( (votante, index) => (
+          <label key={index} className="opcion" >
+            <input 
+              type="radio" 
+              name="opcion" 
+              id={"opcion" + index } 
+              value={votante.name} 
+              onClick={() => plusOne(votante.name) } 
+            />
+            {votante.name}, {votante.votes} votos
+          </label>
+        ))}
       </div>
 
-      <form>
-        <input 
-          type="text"
-          value={newCandidate}
-          onChange={handleInputChange}
-          placeholder="Introduzca el nombre"
-          />
-        <button 
-          type="button" 
-          className="btn"
-          onClick={addNewCandidate} 
-        >Agregar</button>
+      <form id="agregarNombre">
+        <div className="input-group my-3">
+          <input 
+            type="text"
+            className="form-control"
+            value={newCandidate}
+            onChange={handleInputChange}
+            placeholder="Agregar nuevo elector"
+            aria-describedby="agregar-nombre"
+            />
+          <button 
+            type="button" 
+            id="agregar-nombre"
+            className="btn btn-success"
+            onClick={addNewCandidate} 
+            >Agregar</button>
+        </div>
       </form>
     </>
   )
