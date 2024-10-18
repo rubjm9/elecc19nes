@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { collection, addDoc } from 'firebase/firestore';
-import db from './firebase'; // Make sure to import the Firestore instance (db) correctly
+import db from '../firebase'; // Make sure to import the Firestore instance (db) correctly
 
 
 export const AddVoter = ( ) => {
