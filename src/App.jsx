@@ -26,7 +26,7 @@ function App() {
     });
   }
   
-  const [votos, setVotos] = useState(0);
+  // const [votos, setVotos] = useState(0);
   const [newCandidate, setNewCandidate] = useState('')
 
   function handleInputChange(event) {
