@@ -374,8 +374,18 @@ export class FirestoreService {
     try {
       const admins = await this.getAdmins();
       
-      // Si no hay admins, crear los por defecto
-      if (Object.keys(admins).length === 0) {
+      // Verificar si los admins existentes tienen el campo username
+      const hasValidAdmins = Object.values(admins).some(admin => admin.username);
+      
+      // Si no hay admins válidos, limpiar y recrear
+      if (Object.keys(admins).length === 0 || !hasValidAdmins) {
+        console.log('Recreating default admins with proper structure...');
+        
+        // Limpiar admins existentes si no tienen la estructura correcta
+        if (!hasValidAdmins && Object.keys(admins).length > 0) {
+          await this.clearAdmins();
+        }
+        
         await this.createAdmin({
           username: 'admin',
           pass: '1234',
@@ -390,10 +400,29 @@ export class FirestoreService {
           name: 'Super Admin'
         });
         
-        console.log('Default admins created');
+        console.log('Default admins created successfully');
+      } else {
+        console.log('Valid admins already exist');
       }
     } catch (error) {
       console.error('Error initializing default admins:', error);
+    }
+  }
+
+  static async clearAdmins() {
+    try {
+      const querySnapshot = await getDocs(collection(db, 'admins'));
+      const batch = writeBatch(db);
+      
+      querySnapshot.docs.forEach((docSnapshot) => {
+        batch.delete(docSnapshot.ref);
+      });
+      
+      await batch.commit();
+      console.log('Existing admins cleared');
+    } catch (error) {
+      console.error('Error clearing admins:', error);
+      throw error;
     }
   }
 
