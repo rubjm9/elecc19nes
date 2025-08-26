@@ -3,9 +3,7 @@ import {
   doc, 
   addDoc, 
   updateDoc, 
-  deleteDoc, 
   getDocs, 
-  getDoc,
   query,
   where,
   onSnapshot,
@@ -99,7 +97,18 @@ export class FirestoreService {
   static async getAdminByCredentials(username: string, password: string) {
     try {
       const admins = await this.getAdmins();
-      const admin = admins[username];
+      
+      // Buscar admin por nombre de usuario o por nombre
+      let admin = admins[username];
+      if (!admin) {
+        // Buscar por nombre si no se encuentra por username
+        const adminEntry = Object.entries(admins).find(([, adminData]) => 
+          adminData.name.toLowerCase().replace(/\s+/g, '') === username.toLowerCase()
+        );
+        if (adminEntry) {
+          admin = adminEntry[1];
+        }
+      }
       
       if (admin && admin.pass === password) {
         return { username, ...admin };
