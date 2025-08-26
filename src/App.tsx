@@ -1,4 +1,11 @@
 import { useState, useEffect } from 'react';
+import { FirestoreService } from './firebase/firestoreService';
+import type { 
+  FirestoreAdmin, 
+  FirestoreMember, 
+  FirestoreElection, 
+  FirestoreSession 
+} from './firebase/firestoreService';
 
 // --- Iconos SVG ---
 const LockIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>;
@@ -11,35 +18,11 @@ const UsersIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" heigh
 
 const DownloadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>;
 
-// --- Tipos TypeScript ---
-interface Admin {
-  pass: string;
-  role: 'manager' | 'superadmin';
-  name: string;
-}
-
-interface Member {
-  id: string;
-  name: string;
-  email: string | null;
-  key: string;
-  status: 'Presente' | 'Invitado';
-  isEligible: boolean;
-}
-
-interface Election {
-  id: string;
-  name: string;
-  description: string;
-  positionsToElect: number;
-  status: 'Abierta' | 'Cerrada' | 'Prevista';
-  candidates?: string[];
-}
-
-interface Session {
-  id: string;
-  name: string;
-  createdBy: string;
+// --- Tipos TypeScript (usando tipos de Firestore) ---
+interface Admin extends FirestoreAdmin {}
+interface Member extends FirestoreMember {}
+interface Election extends FirestoreElection {}
+interface Session extends FirestoreSession {
   members: Member[];
   elections: { [key: string]: Election };
 }
@@ -68,12 +51,14 @@ interface HomePageProps {
   onLogin: (key: string) => void;
   onAdminClick: () => void;
   error: string;
+  loading?: boolean;
 }
 
 interface AdminLoginProps {
   onLogin: (username: string, password: string) => void;
   onBack: () => void;
   error: string;
+  loading?: boolean;
 }
 
 interface AdminDashboardProps {
@@ -142,26 +127,11 @@ declare global {
 
 const XLSX = (window as any).XLSX;
 
-// --- Base de Datos Simulada ---
+// --- Base de Datos Simulada (inicial vacía, se carga desde Firestore) ---
 const initialDb: Database = {
-  admins: { 'admin': { pass: '1234', role: 'manager' as const, name: 'Admin General' }, 'superadmin': { pass: 'super', role: 'superadmin' as const, name: 'Super Admin' } },
-  sessions: {
-    'sess01': {
-      id: 'sess01', name: 'Asamblea Anual 2025', createdBy: 'admin',
-      members: [
-        { id: 'mem01', name: 'Ana García', email: 'ana@email.com', key: 'AG2X5', status: 'Presente' as const, isEligible: true },
-        { id: 'mem02', name: 'Luis Fernández', email: 'luis@email.com', key: 'LF9Y1', status: 'Invitado' as const, isEligible: true },
-        { id: 'mem03', name: 'Elena Rodríguez', email: 'elena@email.com', key: 'ER4Z8', status: 'Presente' as const, isEligible: true },
-        { id: 'mem04', name: 'Carlos Pérez', email: null, key: 'CP6W3', status: 'Invitado' as const, isEligible: true },
-        { id: 'mem05', name: 'Sofía Martínez', email: 'sofia@email.com', key: 'SM1V7', status: 'Presente' as const, isEligible: true },
-      ],
-      elections: {
-        'elec01': { id: 'elec01', name: 'Elección de Coordinador', description: 'Elegir a una persona para el puesto de coordinador general.', positionsToElect: 1, status: 'Abierta' as const },
-        'elec02': { id: 'elec02', name: 'Elección de Secretario', description: 'Elegir a una persona para el puesto de secretario.', positionsToElect: 1, status: 'Prevista' as const },
-      }
-    }
-  },
-  votes: { 'AG2X5': { 'elec01': ['Elena Rodríguez'] }, 'ER4Z8': { 'elec01': ['Ana García'] } }
+  admins: {},
+  sessions: {},
+  votes: {}
 };
 
 // --- Componente de Modal Genérico ---
@@ -190,68 +160,192 @@ export default function App() {
   const [currentElectionId, setCurrentElectionId] = useState<string | null>(null);
   const [voterKey, setVoterKey] = useState<string | null>(null);
   const [isXlsxLoaded, setIsXlsxLoaded] = useState<boolean>(false);
+  
+  // Estados de carga para Firestore
+  const [loading, setLoading] = useState<boolean>(false);
+  const [initializing, setInitializing] = useState<boolean>(true);
+
+  // Inicialización
+  useEffect(() => {
+    const initializeApp = async () => {
+      try {
+        setInitializing(true);
+        // Inicializar admins por defecto
+        await FirestoreService.initializeDefaultAdmins();
+        // Cargar datos iniciales
+        await loadInitialData();
+      } catch (error) {
+        console.error('Error initializing app:', error);
+        setError('Error al inicializar la aplicación');
+      } finally {
+        setInitializing(false);
+      }
+    };
+
+    initializeApp();
+  }, []);
 
   useEffect(() => { const script = document.createElement('script'); script.src = "https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"; script.async = true; script.onload = () => setIsXlsxLoaded(true); document.body.appendChild(script); return () => { document.body.removeChild(script); }; }, []);
   useEffect(() => { if (error) { const timer = setTimeout(() => setError(''), 4000); return () => clearTimeout(timer); } }, [error]);
+
+  // Cargar datos iniciales
+  const loadInitialData = async () => {
+    try {
+      const [admins, sessions] = await Promise.all([
+        FirestoreService.getAdmins(),
+        FirestoreService.getSessions()
+      ]);
+
+      // Cargar miembros y elecciones para cada sesión
+      const sessionsWithData: { [key: string]: Session } = {};
+      
+      for (const [sessionId, session] of Object.entries(sessions)) {
+        const [members, elections] = await Promise.all([
+          FirestoreService.getMembersBySession(sessionId),
+          FirestoreService.getElectionsBySession(sessionId)
+        ]);
+
+        sessionsWithData[sessionId] = {
+          ...session,
+          members,
+          elections
+        };
+      }
+
+      const votes = await FirestoreService.getVotesBySession(currentSessionId || '');
+
+      setDb({
+        admins,
+        sessions: sessionsWithData,
+        votes
+      });
+    } catch (error) {
+      console.error('Error loading initial data:', error);
+      setError('Error al cargar los datos');
+    }
+  };
   
-  const findMemberByKey = (key: string): (Member & { sessionId: string }) | null => { 
-    for (const sessId in db.sessions) { 
-      const member = db.sessions[sessId].members.find((m: Member) => m.key.toLowerCase() === key.toLowerCase()); 
-      if (member) return { ...member, sessionId: sessId }; 
-    } 
-    return null; 
+  const findMemberByKey = async (key: string): Promise<(Member & { sessionId: string }) | null> => {
+    try {
+      const member = await FirestoreService.findMemberByKey(key);
+      if (member && member.sessionId) {
+        return { ...member, sessionId: member.sessionId };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error finding member by key:', error);
+      return null;
+    }
   };
-  const handleVoterLogin = (key: string) => { 
-    const memberData = findMemberByKey(key); 
-    if (memberData && memberData.status === 'Presente') { 
-      setVoterKey(memberData.key); 
-      setCurrentSessionId(memberData.sessionId); 
-      setPage('voterSession'); 
-      setError(''); 
-    } else if (memberData) { 
-      setError('Aún no has sido acreditado. Acércate al punto de registro.'); 
-    } else { 
-      setError('Clave de acceso no válida.'); 
-    } 
+
+  const handleVoterLogin = async (key: string) => { 
+    try {
+      setLoading(true);
+      const memberData = await findMemberByKey(key); 
+      if (memberData && memberData.status === 'Presente') { 
+        setVoterKey(memberData.key); 
+        setCurrentSessionId(memberData.sessionId); 
+        
+        // Cargar votos del votante
+        const voterVotes = await FirestoreService.getVotesByVoter(key);
+        setDb(prev => ({
+          ...prev,
+          votes: { ...prev.votes, [key]: voterVotes }
+        }));
+        
+        setPage('voterSession'); 
+        setError(''); 
+      } else if (memberData) { 
+        setError('Aún no has sido acreditado. Acércate al punto de registro.'); 
+      } else { 
+        setError('Clave de acceso no válida.'); 
+      } 
+    } catch (error) {
+      console.error('Error during voter login:', error);
+      setError('Error al iniciar sesión');
+    } finally {
+      setLoading(false);
+    }
   };
-  const handleAdminLogin = (username: string, password: string) => { 
-    const adminUser = db.admins[username]; 
-    if (adminUser && adminUser.pass === password) { 
-      setUser({ username, ...adminUser }); 
-      setPage('adminDashboard'); 
-      setError(''); 
-    } else { 
-      setError('Usuario o contraseña incorrectos.'); 
-    } 
+
+  const handleAdminLogin = async (username: string, password: string) => { 
+    try {
+      setLoading(true);
+      const adminUser = await FirestoreService.getAdminByCredentials(username, password);
+      if (adminUser) { 
+        setUser(adminUser); 
+        setPage('adminDashboard'); 
+        setError(''); 
+      } else { 
+        setError('Usuario o contraseña incorrectos.'); 
+      } 
+    } catch (error) {
+      console.error('Error during admin login:', error);
+      setError('Error al iniciar sesión');
+    } finally {
+      setLoading(false);
+    }
   };
   const handleLogout = () => { setUser(null); setPage('home'); };
   
-  const createSession = (sessionName: string, membersList: string) => {
-    const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
-    const names = new Set<string>();
-    let duplicates: string[] = [];
-    const members = membersList.split('\n').filter((line: string) => line.trim() !== '').map((line: string, index: number) => {
+  const createSession = async (sessionName: string, membersList: string) => {
+    try {
+      setLoading(true);
+      const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
+      const names = new Set<string>();
+      let duplicates: string[] = [];
+      
+      const memberData = membersList.split('\n').filter((line: string) => line.trim() !== '').map((line: string) => {
         const parts = line.split(',').map((p: string) => p.trim());
         const name = parts[0];
         if (names.has(name.toLowerCase())) {
-            duplicates.push(name);
-            return null;
+          duplicates.push(name);
+          return null;
         }
         names.add(name.toLowerCase());
         return { 
-          id: `mem${Date.now()}${index}`, 
           name, 
           email: parts.length > 1 ? parts[1] : null, 
           key: generateKey(), 
           status: 'Invitado' as const, 
           isEligible: true 
         };
-    }).filter(Boolean) as Member[];
-    if (duplicates.length > 0) { alert(`Los siguientes miembros estaban duplicados y no se han añadido: ${duplicates.join(', ')}`); }
-    if (members.length === 0) return;
-    const newSessionId = `sess${Date.now()}`;
-    const newSession: Session = { id: newSessionId, name: sessionName, createdBy: user!.username, members, elections: {} };
-    setDb((prev: Database) => ({ ...prev, sessions: { ...prev.sessions, [newSessionId]: newSession } }));
+      }).filter(Boolean);
+
+      if (duplicates.length > 0) { 
+        alert(`Los siguientes miembros estaban duplicados y no se han añadido: ${duplicates.join(', ')}`); 
+      }
+      
+      if (memberData.length === 0) return;
+
+      // Crear sesión en Firestore
+      const sessionId = await FirestoreService.createSession({
+        name: sessionName,
+        createdBy: user!.username
+      });
+
+      // Crear miembros con referencia a la sesión
+      const membersWithSession = memberData.map(member => ({
+        name: member.name!,
+        email: member.email,
+        key: member.key!,
+        status: member.status!,
+        isEligible: member.isEligible!,
+        sessionId
+      }));
+
+      await FirestoreService.createMembers(membersWithSession);
+
+      // Recargar datos
+      await loadInitialData();
+      
+      setError('');
+    } catch (error) {
+      console.error('Error creating session:', error);
+      setError('Error al crear la sesión');
+    } finally {
+      setLoading(false);
+    }
   };
   const addMembersToSession = (sessionId: string, membersList: string) => {
     const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
@@ -306,28 +400,74 @@ export default function App() {
     }); 
   };
   
-  const castVote = (key: string, _sessionId: string, electionId: string, selections: string[]) => {
-    setDb((prev: Database) => { 
-      const newDb = JSON.parse(JSON.stringify(prev)); 
-      if (!newDb.votes[key]) newDb.votes[key] = {}; 
-      newDb.votes[key][electionId] = selections; 
-      return newDb; 
-    });
-    setPage('voteSuccess');
+  const castVote = async (key: string, sessionId: string, electionId: string, selections: string[]) => {
+    try {
+      setLoading(true);
+      await FirestoreService.castVote({
+        voterKey: key,
+        electionId,
+        sessionId,
+        selections
+      });
+
+      // Actualizar estado local
+      setDb((prev: Database) => { 
+        const newDb = JSON.parse(JSON.stringify(prev)); 
+        if (!newDb.votes[key]) newDb.votes[key] = {}; 
+        newDb.votes[key][electionId] = selections; 
+        return newDb; 
+      });
+
+      setPage('voteSuccess');
+    } catch (error) {
+      console.error('Error casting vote:', error);
+      setError('Error al emitir el voto');
+    } finally {
+      setLoading(false);
+    }
   };
-  const addAdmin = (username: string, password: string, name: string) => { 
-    if (db.admins[username]) { 
-      alert('El nombre de usuario ya existe.'); 
-      return; 
-    } 
-    const newAdmin: Admin = { pass: password, role: 'manager', name }; 
-    setDb((prevDb: Database) => ({ ...prevDb, admins: { ...prevDb.admins, [username]: newAdmin } })); 
+  const addAdmin = async (username: string, password: string, name: string) => { 
+    try {
+      setLoading(true);
+      
+      if (db.admins[username]) { 
+        alert('El nombre de usuario ya existe.'); 
+        return; 
+      } 
+
+      await FirestoreService.createAdmin({
+        pass: password,
+        role: 'manager',
+        name
+      });
+
+      // Recargar admins
+      const admins = await FirestoreService.getAdmins();
+      setDb(prev => ({ ...prev, admins }));
+      
+    } catch (error) {
+      console.error('Error adding admin:', error);
+      setError('Error al crear administrador');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const renderPage = () => {
+    // Mostrar pantalla de carga durante la inicialización
+    if (initializing) {
+      return (
+        <div className="text-center p-8 bg-white rounded-lg shadow-xl border border-slate-200">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+          <h2 className="text-xl font-bold text-slate-800 mb-2">Inicializando aplicación...</h2>
+          <p className="text-slate-500">Conectando con Firebase</p>
+        </div>
+      );
+    }
+
     switch (page) {
-      case 'home': return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
-      case 'adminLogin': return <AdminLogin onLogin={handleAdminLogin} onBack={() => setPage('home')} error={error} />;
+      case 'home': return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} loading={loading} />;
+      case 'adminLogin': return <AdminLogin onLogin={handleAdminLogin} onBack={() => setPage('home')} error={error} loading={loading} />;
       case 'adminDashboard': 
         if (!user) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
         return <AdminDashboard user={user} db={db} onManageSession={(id: string) => { setCurrentSessionId(id); setPage('sessionManagement'); }} onCreateSession={createSession} onManageAdmins={() => setPage('superAdminPanel')} onLogout={handleLogout} />;
@@ -361,17 +501,102 @@ export default function App() {
 }
 
 // --- Componentes de Página ---
-function HomePage({ onLogin, onAdminClick, error }: HomePageProps) {
+function HomePage({ onLogin, onAdminClick, error, loading = false }: HomePageProps) {
   const [key, setKey] = useState<string>('');
-  const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (key) onLogin(key); };
-  return ( <div className="text-center"> <h1 className="text-5xl tracking-wider text-cyan-600 mb-2" style={{fontWeight: 900}}>ELECC19NES</h1> <p className="text-slate-500 mb-8">Introduce tu clave de sesión para participar</p> <form onSubmit={handleSubmit} className="flex flex-col gap-4"> <input type="text" value={key} onChange={(e) => setKey(e.target.value.toUpperCase())} maxLength={5} className="bg-white border-2 border-slate-300 rounded-lg text-center text-2xl p-4 tracking-[0.5em] uppercase focus:outline-none focus:border-cyan-500" placeholder="_ _ _ _ _" /> <button type="submit" className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105 shadow-md">Acceder a la sesión</button> </form> {error && <p className="text-red-500 mt-4">{error}</p>} <div className="mt-12"><a href="#" onClick={(e) => { e.preventDefault(); onAdminClick(); }} className="text-slate-500 hover:text-cyan-600 text-sm">Acceso administrador</a></div> </div> );
+  const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (key && !loading) onLogin(key); };
+  return ( 
+    <div className="text-center"> 
+      <h1 className="text-5xl tracking-wider text-cyan-600 mb-2" style={{fontWeight: 900}}>ELECC19NES</h1> 
+      <p className="text-slate-500 mb-8">Introduce tu clave de sesión para participar</p> 
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4"> 
+        <input 
+          type="text" 
+          value={key} 
+          onChange={(e) => setKey(e.target.value.toUpperCase())} 
+          maxLength={5} 
+          className="bg-white border-2 border-slate-300 rounded-lg text-center text-2xl p-4 tracking-[0.5em] uppercase focus:outline-none focus:border-cyan-500" 
+          placeholder="_ _ _ _ _"
+          disabled={loading}
+        /> 
+        <button 
+          type="submit" 
+          className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={loading}
+        >
+          {loading ? (
+            <div className="flex items-center justify-center gap-2">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+              Conectando...
+            </div>
+          ) : (
+            'Acceder a la sesión'
+          )}
+        </button> 
+      </form> 
+      {error && <p className="text-red-500 mt-4">{error}</p>} 
+      <div className="mt-12">
+        <a href="#" onClick={(e) => { e.preventDefault(); if (!loading) onAdminClick(); }} className="text-slate-500 hover:text-cyan-600 text-sm">
+          Acceso administrador
+        </a>
+      </div> 
+    </div> 
+  );
 }
 
-function AdminLogin({ onLogin, onBack, error }: AdminLoginProps) {
+function AdminLogin({ onLogin, onBack, error, loading = false }: AdminLoginProps) {
   const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
-  const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); onLogin(username, password); };
-  return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200"> <button onClick={onBack} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold"><ArrowLeftIcon /> Volver</button> <h2 className="text-2xl font-bold mb-6 text-center text-cyan-700">Acceso administrador</h2> <form onSubmit={handleSubmit} className="flex flex-col gap-4"> <div className="relative"><span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400"><UserIcon /></span><input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 pl-12 focus:outline-none focus:border-cyan-500" placeholder="Usuario" /></div> <div className="relative"><span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400"><LockIcon /></span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 pl-12 focus:outline-none focus:border-cyan-500" placeholder="Contraseña" /></div> <button type="submit" className="mt-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105 shadow-md">Entrar</button> </form> {error && <p className="text-red-500 mt-4 text-center">{error}</p>} <div className="text-xs text-slate-400 mt-4 text-center"><p>Users: admin (pass: 1234), superadmin (pass: super)</p></div> </div> );
+  const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (!loading) onLogin(username, password); };
+  return ( 
+    <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200"> 
+      <button onClick={() => !loading && onBack()} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold disabled:opacity-50" disabled={loading}>
+        <ArrowLeftIcon /> Volver
+      </button> 
+      <h2 className="text-2xl font-bold mb-6 text-center text-cyan-700">Acceso administrador</h2> 
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4"> 
+        <div className="relative">
+          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400"><UserIcon /></span>
+          <input 
+            type="text" 
+            value={username} 
+            onChange={(e) => setUsername(e.target.value)} 
+            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 pl-12 focus:outline-none focus:border-cyan-500" 
+            placeholder="Usuario"
+            disabled={loading}
+          />
+        </div> 
+        <div className="relative">
+          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400"><LockIcon /></span>
+          <input 
+            type="password" 
+            value={password} 
+            onChange={(e) => setPassword(e.target.value)} 
+            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 pl-12 focus:outline-none focus:border-cyan-500" 
+            placeholder="Contraseña"
+            disabled={loading}
+          />
+        </div> 
+        <button 
+          type="submit" 
+          className="mt-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={loading}
+        >
+          {loading ? (
+            <div className="flex items-center justify-center gap-2">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+              Conectando...
+            </div>
+          ) : (
+            'Entrar'
+          )}
+        </button> 
+      </form> 
+      {error && <p className="text-red-500 mt-4 text-center">{error}</p>} 
+      <div className="text-xs text-slate-400 mt-4 text-center">
+        <p>Users: admin (pass: 1234), superadmin (pass: super)</p>
+      </div> 
+    </div> 
+  );
 }
 
 function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAdmins, onLogout }: AdminDashboardProps) {
@@ -406,14 +631,14 @@ function SessionManagement({ session, votes, onAccredit, onToggleEligibility, on
     const [activeTab, setActiveTab] = useState<string>('acreditacion');
     const [filter, setFilter] = useState<string>('');
     const [showCreateElection, setShowCreateElection] = useState<boolean>(false);
-    const [newElection, setNewElection] = useState<Omit<Election, 'id' | 'status'>>({ name: '', description: '', positionsToElect: 1 });
+    const [newElection, setNewElection] = useState({ name: '', description: '', positionsToElect: 1 });
     const [newMembersList, setNewMembersList] = useState<string>('');
     const [isCloseModalOpen, setCloseModalOpen] = useState<boolean>(false);
     const [electionToManage, setElectionToManage] = useState<Election | null>(null);
     const [isProgressModalOpen, setProgressModalOpen] = useState<boolean>(false);
 
-    const handleCreateElection = (e: React.FormEvent) => { e.preventDefault(); onAddElection(session.id, { ...newElection, status: 'Prevista' as const }); setShowCreateElection(false); setNewElection({ name: '', description: '', positionsToElect: 1 }); };
-    const handleAddMembers = (e: React.FormEvent) => { e.preventDefault(); onAddMembers(session.id, newMembersList); setNewMembersList(''); };
+    const handleCreateElection = (e: React.FormEvent) => { e.preventDefault(); onAddElection(session.id!, { ...newElection, status: 'Prevista' as const }); setShowCreateElection(false); setNewElection({ name: '', description: '', positionsToElect: 1 }); };
+    const handleAddMembers = (e: React.FormEvent) => { e.preventDefault(); onAddMembers(session.id!, newMembersList); setNewMembersList(''); };
     const filteredMembers = session.members.filter((m: Member) => m.name.toLowerCase().includes(filter.toLowerCase()));
     
     const downloadMemberList = () => { if (!isXlsxLoaded) { alert("La librería de exportación no está lista."); return; } const data = session.members.map(({ name, key, email }) => ({ Nombre: name, Clave: key, Email: email || '' })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Miembros"); XLSX.writeFile(wb, `miembros_${session.name.replace(/ /g, '_')}.xlsx`); };
@@ -423,14 +648,14 @@ function SessionManagement({ session, votes, onAccredit, onToggleEligibility, on
     const TabButton = ({ tabName, label }: { tabName: string; label: string }) => ( <button onClick={() => setActiveTab(tabName)} className={`py-2 px-4 text-sm font-bold rounded-t-lg ${activeTab === tabName ? 'bg-white border-b-0 border border-slate-200' : 'bg-slate-100 border border-slate-200'}`}> {label} </button> );
 
     const accreditedVoters = session.members.filter((m: Member) => m.status === 'Presente');
-    const votesForElection = electionToManage ? Object.values(votes).map((v: { [electionId: string]: string[] }) => v[electionToManage.id]).filter(Boolean).length : 0;
+    const votesForElection = electionToManage ? Object.values(votes).map((v: { [electionId: string]: string[] }) => v[electionToManage.id!]).filter(Boolean).length : 0;
     const pendingVoters = accreditedVoters.length - votesForElection;
 
     return ( <>
         <Modal isOpen={isCloseModalOpen} onClose={() => setCloseModalOpen(false)} title="Confirmar cierre">
             <p className="text-slate-600 mb-4">¿Estás seguro? Una vez cerrada no podrá votar nadie más.</p>
             {pendingVoters > 0 && <p className="font-bold text-orange-600 mb-4">Atención: Todavía {pendingVoters === 1 ? 'falta 1 persona' : `faltan ${pendingVoters} personas`} por votar.</p>}
-            <div className="flex justify-end gap-3 mt-4"> <button onClick={() => setCloseModalOpen(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg">Cancelar</button> <button onClick={() => { if (electionToManage) onChangeElectionStatus(session.id, electionToManage.id, 'Cerrada'); setCloseModalOpen(false); }} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg">Cerrar elección</button> </div>
+            <div className="flex justify-end gap-3 mt-4"> <button onClick={() => setCloseModalOpen(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg">Cancelar</button> <button onClick={() => { if (electionToManage) onChangeElectionStatus(session.id!, electionToManage.id!, 'Cerrada'); setCloseModalOpen(false); }} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg">Cerrar elección</button> </div>
         </Modal>
         {electionToManage && <Modal isOpen={isProgressModalOpen} onClose={() => setProgressModalOpen(false)} title={`Progreso: ${electionToManage?.name}`}>
             <div className="mt-2"> <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesForElection} / {accreditedVoters.length}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: `${accreditedVoters.length > 0 ? (votesForElection / accreditedVoters.length) * 100 : 0}%` }}></div></div> </div>
