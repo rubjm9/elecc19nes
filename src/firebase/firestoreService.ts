@@ -3,6 +3,7 @@ import {
   doc, 
   addDoc, 
   updateDoc, 
+  deleteDoc,
   getDocs, 
   query,
   where,
@@ -77,6 +78,17 @@ export class FirestoreService {
       return docRef.id;
     } catch (error) {
       console.error('Error creating admin:', error);
+      throw error;
+    }
+  }
+
+  static async deleteAdmin(adminId: string) {
+    try {
+      await deleteDoc(doc(db, 'admins', adminId));
+      console.log('Admin deleted successfully');
+      return true;
+    } catch (error) {
+      console.error('Error deleting admin:', error);
       throw error;
     }
   }

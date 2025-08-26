@@ -17,6 +17,7 @@ const XCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" hei
 const UsersIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>;
 
 const DownloadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>;
+const XIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 6-12 12"></path><path d="m6 6 12 12"></path></svg>;
 
 // --- Tipos TypeScript (usando tipos de Firestore) ---
 interface Admin extends FirestoreAdmin {}
@@ -115,6 +116,7 @@ interface ResultsPageProps {
 interface SuperAdminPanelProps {
   admins: Database['admins'];
   onAddAdmin: (username: string, password: string, name: string) => void;
+  onDeleteAdmin: (adminId: string, adminName: string) => void;
   onBack: () => void;
 }
 
@@ -454,6 +456,30 @@ export default function App() {
     }
   };
 
+  const deleteAdmin = async (adminId: string, adminName: string) => {
+    try {
+      // Confirmar eliminación
+      const confirmed = window.confirm(`¿Estás seguro de que quieres eliminar al administrador "${adminName}"?\n\nEsta acción no se puede deshacer.`);
+      if (!confirmed) return;
+
+      setLoading(true);
+      
+      await FirestoreService.deleteAdmin(adminId);
+
+      // Recargar admins
+      const admins = await FirestoreService.getAdmins();
+      setDb(prev => ({ ...prev, admins }));
+      
+      alert('Administrador eliminado correctamente');
+      
+    } catch (error) {
+      console.error('Error deleting admin:', error);
+      setError('Error al eliminar administrador');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const renderPage = () => {
     // Mostrar pantalla de carga durante la inicialización
     if (initializing) {
@@ -472,7 +498,7 @@ export default function App() {
       case 'adminDashboard': 
         if (!user) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
         return <AdminDashboard user={user} db={db} onManageSession={(id: string) => { setCurrentSessionId(id); setPage('sessionManagement'); }} onCreateSession={createSession} onManageAdmins={() => setPage('superAdminPanel')} onLogout={handleLogout} />;
-      case 'superAdminPanel': return <SuperAdminPanel admins={db.admins} onAddAdmin={addAdmin} onBack={() => setPage('adminDashboard')} />;
+      case 'superAdminPanel': return <SuperAdminPanel admins={db.admins} onAddAdmin={addAdmin} onDeleteAdmin={deleteAdmin} onBack={() => setPage('adminDashboard')} />;
       case 'sessionManagement': 
         if (!currentSessionId || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
         return <SessionManagement session={db.sessions[currentSessionId]} votes={db.votes} onAccredit={accreditMember} onToggleEligibility={toggleMemberEligibility} onChangeElectionStatus={changeElectionStatus} onAddElection={addElectionToSession} onAddMembers={addMembersToSession} onBack={() => setPage('adminDashboard')} onViewResults={(elecId: string) => { setCurrentElectionId(elecId); setPage('results'); }} isXlsxLoaded={isXlsxLoaded}/>;
@@ -774,11 +800,11 @@ function ResultsPage({ session, election, votes, onBack, onAddElection }: Result
     return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <button onClick={onBack} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold"><ArrowLeftIcon /> Volver a gestión</button> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && <div className="my-4"><button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button></div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
 }
 
-function SuperAdminPanel({ admins, onAddAdmin, onBack }: SuperAdminPanelProps) {
+function SuperAdminPanel({ admins, onAddAdmin, onDeleteAdmin, onBack }: SuperAdminPanelProps) {
     const [username, setUsername] = useState<string>('');
     const [password, setPassword] = useState<string>('');
     const [name, setName] = useState<string>('');
     const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (!username || !password || !name) { alert('Por favor, completa todos los campos.'); return; } onAddAdmin(username, password, name); setUsername(''); setPassword(''); setName(''); };
     const managerAdmins = Object.entries(admins).filter(([, details]: [string, Admin]) => details.role === 'manager');
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <button onClick={onBack} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold"><ArrowLeftIcon /> Volver al panel</button> <h2 className="text-2xl font-bold text-cyan-700 mb-4">Gestionar administradores</h2> <div className="mb-6 border-t border-slate-200 pt-4"> <h3 className="text-lg font-semibold text-slate-700 mb-2">Crear nuevo administrador</h3> <form onSubmit={handleSubmit} className="space-y-3"> <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre completo" /> <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre de usuario" /> <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Contraseña" /> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg shadow">Crear administrador</button> </form> </div> <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Lista de administradores</h3> <div className="space-y-2 max-h-60 overflow-y-auto pr-2"> {managerAdmins.map(([username, details]) => ( <div key={username} className="bg-slate-100 p-3 rounded-lg"> <p className="font-semibold text-slate-800">{details.name}</p> <p className="text-sm text-slate-500">Usuario: {username}</p> </div> ))} </div> </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <button onClick={onBack} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold"><ArrowLeftIcon /> Volver al panel</button> <h2 className="text-2xl font-bold text-cyan-700 mb-4">Gestionar administradores</h2> <div className="mb-6 border-t border-slate-200 pt-4"> <h3 className="text-lg font-semibold text-slate-700 mb-2">Crear nuevo administrador</h3> <form onSubmit={handleSubmit} className="space-y-3"> <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre completo" /> <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre de usuario" /> <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Contraseña" /> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg shadow">Crear administrador</button> </form> </div> <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Lista de administradores</h3> <div className="space-y-2 max-h-60 overflow-y-auto pr-2"> {managerAdmins.map(([adminId, details]) => ( <div key={adminId} className="bg-slate-100 p-3 rounded-lg flex justify-between items-center"> <div> <p className="font-semibold text-slate-800">{details.name}</p> <p className="text-sm text-slate-500">Usuario: {details.username}</p> </div> <button onClick={() => onDeleteAdmin(adminId, details.name)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded-lg text-sm flex items-center gap-1 transition-colors"> <XIcon /> Eliminar </button> </div> ))} </div> </div> );
 }
