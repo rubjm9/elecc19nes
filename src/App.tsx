@@ -187,7 +187,7 @@ export default function App() {
 
   useEffect(() => { const script = document.createElement('script'); script.src = "https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"; script.async = true; script.onload = () => setIsXlsxLoaded(true); document.body.appendChild(script); return () => { document.body.removeChild(script); }; }, []);
   useEffect(() => { if (error) { const timer = setTimeout(() => setError(''), 4000); return () => clearTimeout(timer); } }, [error]);
-
+  
   // Cargar datos iniciales
   const loadInitialData = async () => {
     try {
@@ -299,8 +299,8 @@ export default function App() {
         const parts = line.split(',').map((p: string) => p.trim());
         const name = parts[0];
         if (names.has(name.toLowerCase())) {
-          duplicates.push(name);
-          return null;
+            duplicates.push(name);
+            return null;
         }
         names.add(name.toLowerCase());
         return { 
@@ -310,7 +310,7 @@ export default function App() {
           status: 'Invitado' as const, 
           isEligible: true 
         };
-      }).filter(Boolean);
+    }).filter(Boolean);
 
       if (duplicates.length > 0) { 
         alert(`Los siguientes miembros estaban duplicados y no se han añadido: ${duplicates.join(', ')}`); 
@@ -326,11 +326,11 @@ export default function App() {
 
       // Crear miembros con referencia a la sesión
       const membersWithSession = memberData.map(member => ({
-        name: member.name!,
-        email: member.email,
-        key: member.key!,
-        status: member.status!,
-        isEligible: member.isEligible!,
+        name: member?.name || '',
+        email: member?.email || '',
+        key: member?.key || '',
+        status: member?.status || 'Invitado' as const,
+        isEligible: member?.isEligible || false,
         sessionId
       }));
 
@@ -418,7 +418,7 @@ export default function App() {
         return newDb; 
       });
 
-      setPage('voteSuccess');
+    setPage('voteSuccess');
     } catch (error) {
       console.error('Error casting vote:', error);
       setError('Error al emitir el voto');
@@ -436,6 +436,7 @@ export default function App() {
       } 
 
       await FirestoreService.createAdmin({
+        username,
         pass: password,
         role: 'manager',
         name
@@ -622,7 +623,7 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
                 {user.role === 'superadmin' && <button onClick={onManageAdmins} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 text-white font-bold py-3 rounded-lg shadow-md"><UsersIcon /> Gestionar admins</button>}
             </div>
             <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Sesiones de votación</h3> 
-            <div className="space-y-4 max-h-96 overflow-y-auto"> {userSessions.length > 0 ? userSessions.map(session => ( <div key={session.id} className="bg-slate-50 border border-slate-200 p-4 rounded-lg"> <div className="flex justify-between items-start"> <div><h4 className="font-bold text-slate-800">{session.name}</h4><p className="text-sm text-slate-500">{session.members.length} miembros</p></div> <button onClick={() => onManageSession(session.id)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-lg text-sm">Gestionar</button> </div> </div> )) : <p className="text-slate-500 text-center py-4">No has creado ninguna sesión.</p>} </div> 
+            <div className="space-y-4 max-h-96 overflow-y-auto"> {userSessions.length > 0 ? userSessions.map(session => ( <div key={session.id} className="bg-slate-50 border border-slate-200 p-4 rounded-lg"> <div className="flex justify-between items-start"> <div><h4 className="font-bold text-slate-800">{session.name}</h4><p className="text-sm text-slate-500">{session.members.length} miembros</p></div> <button onClick={() => session.id && onManageSession(session.id)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-lg text-sm">Gestionar</button> </div> </div> )) : <p className="text-slate-500 text-center py-4">No has creado ninguna sesión.</p>} </div> 
         </div>
     </> );
 }
@@ -637,7 +638,7 @@ function SessionManagement({ session, votes, onAccredit, onToggleEligibility, on
     const [electionToManage, setElectionToManage] = useState<Election | null>(null);
     const [isProgressModalOpen, setProgressModalOpen] = useState<boolean>(false);
 
-    const handleCreateElection = (e: React.FormEvent) => { e.preventDefault(); onAddElection(session.id!, { ...newElection, status: 'Prevista' as const }); setShowCreateElection(false); setNewElection({ name: '', description: '', positionsToElect: 1 }); };
+    const handleCreateElection = (e: React.FormEvent) => { e.preventDefault(); if (session.id) { onAddElection(session.id, { ...newElection, status: 'Prevista' as const, sessionId: session.id }); setShowCreateElection(false); setNewElection({ name: '', description: '', positionsToElect: 1 }); } };
     const handleAddMembers = (e: React.FormEvent) => { e.preventDefault(); onAddMembers(session.id!, newMembersList); setNewMembersList(''); };
     const filteredMembers = session.members.filter((m: Member) => m.name.toLowerCase().includes(filter.toLowerCase()));
     
@@ -755,7 +756,7 @@ function ResultsPage({ session, election, votes, onBack, onAddElection }: Result
     const results: { [name: string]: number } = {};
     candidatesForResults.forEach((name: string) => { results[name] = 0; });
     
-    electionVotes.forEach((voteList: string[]) => { if(Array.isArray(voteList)) { voteList.forEach((name: string) => { if (results.hasOwnProperty(name)) results[name]++; }); } });
+    electionVotes.forEach((voteList) => { if(Array.isArray(voteList)) { voteList.forEach((name: string) => { if (results.hasOwnProperty(name)) results[name]++; }); } });
     
     const sortedResults = Object.entries(results).sort(([, a], [, b]) => (b as number) - (a as number));
     const maxVotes = sortedResults.length > 0 ? (sortedResults[0][1] as number) : 0;
@@ -765,7 +766,7 @@ function ResultsPage({ session, election, votes, onBack, onAddElection }: Result
     const tiedCandidates = winners.length > election.positionsToElect ? winners.map(([name]) => name) : [];
 
     const createTiebreaker = () => {
-        const tiebreakerElection = { name: `Desempate: ${election.name}`, description: `Votación de desempate. Candidatos: ${tiedCandidates.join(', ')}.`, positionsToElect: election.positionsToElect, status: 'Prevista' as const, candidates: tiedCandidates };
+        const tiebreakerElection = { name: `Desempate: ${election.name}`, description: `Votación de desempate. Candidatos: ${tiedCandidates.join(', ')}.`, positionsToElect: election.positionsToElect, status: 'Prevista' as const, candidates: tiedCandidates, sessionId: session.id! };
         if (session.id) onAddElection(session.id, tiebreakerElection);
         onBack();
     };

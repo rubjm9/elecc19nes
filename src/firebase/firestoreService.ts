@@ -11,10 +11,12 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db } from './config';
+import bcrypt from 'bcryptjs';
 
 // Tipos actualizados para Firestore
 export interface FirestoreAdmin {
   id?: string;
+  username: string;
   pass: string;
   role: 'manager' | 'superadmin';
   name: string;
@@ -64,8 +66,12 @@ export class FirestoreService {
   // === ADMINISTRADORES ===
   static async createAdmin(admin: Omit<FirestoreAdmin, 'id' | 'createdAt'>) {
     try {
+      // Cifrar la contraseña antes de guardarla
+      const hashedPassword = await bcrypt.hash(admin.pass, 10);
+      
       const docRef = await addDoc(collection(db, 'admins'), {
         ...admin,
+        pass: hashedPassword,
         createdAt: Timestamp.now()
       });
       return docRef.id;
@@ -98,20 +104,24 @@ export class FirestoreService {
     try {
       const admins = await this.getAdmins();
       
-      // Buscar admin por nombre de usuario o por nombre
-      let admin = admins[username];
-      if (!admin) {
-        // Buscar por nombre si no se encuentra por username
-        const adminEntry = Object.entries(admins).find(([, adminData]) => 
-          adminData.name.toLowerCase().replace(/\s+/g, '') === username.toLowerCase()
-        );
-        if (adminEntry) {
-          admin = adminEntry[1];
+      // Buscar admin por username
+      let admin = null;
+      let adminKey = '';
+      
+      for (const [key, adminData] of Object.entries(admins)) {
+        if (adminData.username === username) {
+          admin = adminData;
+          adminKey = key;
+          break;
         }
       }
       
-      if (admin && admin.pass === password) {
-        return { username, ...admin };
+      if (admin) {
+        // Verificar contraseña usando bcrypt
+        const isValidPassword = await bcrypt.compare(password, admin.pass);
+        if (isValidPassword) {
+          return { ...admin, id: adminKey };
+        }
       }
       
       return null;
@@ -367,12 +377,14 @@ export class FirestoreService {
       // Si no hay admins, crear los por defecto
       if (Object.keys(admins).length === 0) {
         await this.createAdmin({
+          username: 'admin',
           pass: '1234',
           role: 'manager',
           name: 'Admin General'
         });
         
         await this.createAdmin({
+          username: 'superadmin',
           pass: 'super',
           role: 'superadmin',
           name: 'Super Admin'
