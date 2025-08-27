@@ -381,6 +381,26 @@ export class FirestoreService {
     }
   }
 
+  static async getAllVotes() {
+    try {
+      const querySnapshot = await getDocs(collection(db, 'votes'));
+      const votes: { [voterKey: string]: { [electionId: string]: string[] } } = {};
+      
+      querySnapshot.forEach((doc) => {
+        const vote = doc.data() as FirestoreVote;
+        if (!votes[vote.voterKey]) {
+          votes[vote.voterKey] = {};
+        }
+        votes[vote.voterKey][vote.electionId] = vote.selections;
+      });
+      
+      return votes;
+    } catch (error) {
+      console.error('Error getting all votes:', error);
+      throw error;
+    }
+  }
+
   // === UTILIDADES ===
   static async initializeDefaultAdmins() {
     try {

@@ -370,13 +370,40 @@ export default function App() {
     if (newMembers.length === 0) return;
     setDb((prev: Database) => { const newDb = JSON.parse(JSON.stringify(prev)); newDb.sessions[sessionId].members.push(...newMembers); return newDb; });
   };
-  const accreditMember = (sessionId: string, memberId: string) => { 
-    setDb((prev: Database) => { 
-      const newDb = JSON.parse(JSON.stringify(prev)); 
-      const member = newDb.sessions[sessionId].members.find((m: Member) => m.id === memberId); 
-      if (member) member.status = 'Presente'; 
-      return newDb; 
-    }); 
+  const accreditMember = async (sessionId: string, memberId: string) => { 
+    try {
+      setLoading(true);
+      
+      const member = db.sessions[sessionId].members.find(m => m.id === memberId);
+      if (!member) return;
+      
+      const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
+      const newKey = generateKey();
+      
+      // Actualizar en Firestore
+      await FirestoreService.updateMember(memberId, { 
+        status: 'Presente', 
+        key: newKey 
+      });
+      
+      // Actualizar estado local
+      setDb((prev: Database) => { 
+        const newDb = JSON.parse(JSON.stringify(prev)); 
+        const member = newDb.sessions[sessionId].members.find((m: Member) => m.id === memberId); 
+        if (member) { 
+          member.status = 'Presente'; 
+          member.key = newKey; 
+        } 
+        return newDb; 
+      });
+      
+      console.log('Miembro acreditado:', member.name, 'Clave:', newKey);
+    } catch (error) {
+      console.error('Error accrediting member:', error);
+      setError('Error al acreditar al miembro');
+    } finally {
+      setLoading(false);
+    }
   };
   const toggleMemberEligibility = (sessionId: string, memberId: string) => { 
     setDb((prev: Database) => { 
