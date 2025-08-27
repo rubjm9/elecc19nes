@@ -214,12 +214,13 @@ export default function App() {
         };
       }
 
-      const votes = await FirestoreService.getVotesBySession(currentSessionId || '');
+      // Cargar todos los votos
+      const allVotes = await FirestoreService.getAllVotes();
 
       setDb({
         admins,
         sessions: sessionsWithData,
-        votes
+        votes: allVotes
       });
     } catch (error) {
       console.error('Error loading initial data:', error);
@@ -405,28 +406,79 @@ export default function App() {
       setLoading(false);
     }
   };
-  const toggleMemberEligibility = (sessionId: string, memberId: string) => { 
-    setDb((prev: Database) => { 
-      const newDb = JSON.parse(JSON.stringify(prev)); 
-      const member = newDb.sessions[sessionId].members.find((m: Member) => m.id === memberId); 
-      if (member) member.isEligible = !member.isEligible; 
-      return newDb; 
-    }); 
+  const toggleMemberEligibility = async (sessionId: string, memberId: string) => { 
+    try {
+      setLoading(true);
+      
+      const member = db.sessions[sessionId].members.find(m => m.id === memberId);
+      if (!member) return;
+      
+      const newEligibility = !member.isEligible;
+      
+      // Actualizar en Firestore
+      await FirestoreService.updateMember(memberId, { 
+        isEligible: newEligibility 
+      });
+      
+      // Actualizar estado local
+      setDb((prev: Database) => { 
+        const newDb = JSON.parse(JSON.stringify(prev)); 
+        const member = newDb.sessions[sessionId].members.find((m: Member) => m.id === memberId); 
+        if (member) member.isEligible = newEligibility; 
+        return newDb; 
+      });
+      
+      console.log('Elegibilidad actualizada:', member.name, newEligibility);
+    } catch (error) {
+      console.error('Error updating member eligibility:', error);
+      setError('Error al actualizar la elegibilidad');
+    } finally {
+      setLoading(false);
+    }
   };
-  const changeElectionStatus = (sessionId: string, electionId: string, status: Election['status']) => { 
-    setDb((prev: Database) => { 
-      const newDb = JSON.parse(JSON.stringify(prev)); 
-      newDb.sessions[sessionId].elections[electionId].status = status; 
-      return newDb; 
-    }); 
+  const changeElectionStatus = async (sessionId: string, electionId: string, status: Election['status']) => { 
+    try {
+      setLoading(true);
+      
+      // Actualizar en Firestore
+      await FirestoreService.updateElection(electionId, { status });
+      
+      // Actualizar estado local
+      setDb((prev: Database) => { 
+        const newDb = JSON.parse(JSON.stringify(prev)); 
+        newDb.sessions[sessionId].elections[electionId].status = status; 
+        return newDb; 
+      });
+      
+      console.log('Estado de elección actualizado:', status);
+    } catch (error) {
+      console.error('Error updating election status:', error);
+      setError('Error al actualizar el estado de la elección');
+    } finally {
+      setLoading(false);
+    }
   };
-  const addElectionToSession = (sessionId: string, electionData: Omit<Election, 'id'>) => { 
-    setDb((prev: Database) => { 
-      const newDb = JSON.parse(JSON.stringify(prev)); 
-      const newElectionId = `elec${Date.now()}`; 
-      newDb.sessions[sessionId].elections[newElectionId] = { id: newElectionId, ...electionData }; 
-      return newDb; 
-    }); 
+  const addElectionToSession = async (sessionId: string, electionData: Omit<Election, 'id'>) => { 
+    try {
+      setLoading(true);
+      
+      // Crear elección en Firestore
+      const electionId = await FirestoreService.createElection(electionData);
+      
+      // Actualizar estado local
+      setDb((prev: Database) => { 
+        const newDb = JSON.parse(JSON.stringify(prev)); 
+        newDb.sessions[sessionId].elections[electionId] = { id: electionId, ...electionData }; 
+        return newDb; 
+      });
+      
+      console.log('Elección creada exitosamente:', electionId);
+    } catch (error) {
+      console.error('Error creating election:', error);
+      setError('Error al crear la elección');
+    } finally {
+      setLoading(false);
+    }
   };
   
   const castVote = async (key: string, sessionId: string, electionId: string, selections: string[]) => {
