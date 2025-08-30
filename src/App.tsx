@@ -537,17 +537,52 @@ export default function App() {
 
   const deleteAdmin = async (adminId: string, adminName: string) => {
     try {
+      console.log('Iniciando eliminación de administrador:', { adminId, adminName });
+      console.log('Estado actual de admins:', db.admins);
+      
       // Confirmar eliminación
       const confirmed = window.confirm(`¿Estás seguro de que quieres eliminar al administrador "${adminName}"?\n\nEsta acción no se puede deshacer.`);
-      if (!confirmed) return;
+      if (!confirmed) {
+        console.log('Eliminación cancelada por el usuario');
+        return;
+      }
 
+      console.log('Confirmación aceptada, procediendo con la eliminación...');
       setLoading(true);
       
-      await FirestoreService.deleteAdmin(adminId);
+      // Verificar que el adminId existe en el estado local
+      if (!db.admins[adminId]) {
+        console.error('No se encontró el administrador en el estado local con la clave:', adminId);
+        console.log('Claves disponibles:', Object.keys(db.admins));
+        setError('Error: No se pudo identificar el administrador');
+        return;
+      }
+      
+      console.log('Administrador encontrado en estado local:', db.admins[adminId]);
+      
+      // Obtener el ID del documento de Firestore
+      const firestoreId = db.admins[adminId].id;
+      if (!firestoreId) {
+        console.error('No se encontró el ID de Firestore para el administrador');
+        setError('Error: No se pudo identificar el administrador en la base de datos');
+        return;
+      }
+      
+      console.log('ID de Firestore encontrado:', firestoreId);
+      
+      // Llamar al servicio con el ID del documento de Firestore
+      console.log('Llamando a FirestoreService.deleteAdmin...');
+      await FirestoreService.deleteAdmin(firestoreId);
+      console.log('Administrador eliminado exitosamente en Firestore');
 
-      // Recargar admins
-      const admins = await FirestoreService.getAdmins();
-      setDb(prev => ({ ...prev, admins }));
+      // Actualizar el estado local directamente
+      console.log('Actualizando estado local...');
+      setDb(prev => {
+        const newAdmins = { ...prev.admins };
+        delete newAdmins[adminId];
+        console.log('Estado local actualizado, admins restantes:', Object.keys(newAdmins));
+        return { ...prev, admins: newAdmins };
+      });
       
       alert('Administrador eliminado correctamente');
       
@@ -603,7 +638,7 @@ export default function App() {
     }
   };
 
-  return ( <> <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,700;9..40,900&display=swap');`}</style> <div className="bg-gradient-to-br from-slate-50 to-slate-200 text-slate-800 min-h-screen font-sans flex items-center justify-center p-4" style={{ fontFamily: "'DM Sans', sans-serif" }}> <div className="w-full max-w-md">{renderPage()}</div> </div> </> );
+  return ( <> <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,700;9..40,900&display=swap');`}</style> <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-100 flex items-center justify-center p-4 font-sans" style={{ fontFamily: "'DM Sans', sans-serif" }}> <div className="w-full max-w-md">{renderPage()}</div> </div> </> );
 }
 
 // --- Componentes de Página ---
@@ -613,39 +648,42 @@ function HomePage({ onLogin, onAdminClick, error, loading = false }: HomePagePro
   return ( 
     <div className="text-center"> 
       <h1 className="text-5xl tracking-wider text-cyan-600 mb-2" style={{fontWeight: 900}}>ELECC19NES</h1> 
-      <p className="text-slate-500 mb-8">Introduce tu clave de sesión para participar</p> 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4"> 
-        <input 
-          type="text" 
-          value={key} 
-          onChange={(e) => setKey(e.target.value.toUpperCase())} 
-          maxLength={5} 
-          className="bg-white border-2 border-slate-300 rounded-lg text-center text-2xl p-4 tracking-[0.5em] uppercase focus:outline-none focus:border-cyan-500" 
-          placeholder="_ _ _ _ _"
-          disabled={loading}
-        /> 
-        <button 
-          type="submit" 
-          className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={loading}
-        >
-          {loading ? (
-            <div className="flex items-center justify-center gap-2">
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-              Conectando...
-            </div>
-          ) : (
-            'Acceder a la sesión'
-          )}
-        </button> 
-      </form> 
-      {error && <p className="text-red-500 mt-4">{error}</p>} 
-      <div className="mt-12">
-        <a href="#" onClick={(e) => { e.preventDefault(); if (!loading) onAdminClick(); }} className="text-slate-500 hover:text-cyan-600 text-sm">
-          Acceso administrador
-        </a>
+      <div className="bg-white rounded-2xl shadow-xl p-8 space-y-6">
+        <h2 className="text-2xl font-bold text-slate-800 mb-2">Acceso de votantes</h2>
+        <p className="text-slate-500 mb-8">Introduce tu clave de sesión para participar</p> 
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4"> 
+          <input 
+            type="text" 
+            value={key} 
+            onChange={(e) => setKey(e.target.value.toUpperCase())} 
+            maxLength={5} 
+            className="bg-slate-50 border-2 border-slate-300 rounded-lg text-center text-2xl p-4 tracking-[0.5em] uppercase focus:outline-none focus:border-cyan-500" 
+            placeholder="_ _ _ _ _"
+            disabled={loading}
+          /> 
+          <button 
+            type="submit" 
+            className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={loading}
+          >
+            {loading ? (
+              <div className="flex items-center justify-center gap-2">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                Conectando...
+              </div>
+            ) : (
+              'Acceder a la sesión'
+            )}
+          </button> 
+        </form> 
+        {error && <div className="bg-red-50 border border-red-200 rounded-lg p-3"><p className="text-red-600 text-sm text-center">{error}</p></div>} 
+        <div className="mt-12">
+          <a href="#" onClick={(e) => { e.preventDefault(); if (!loading) onAdminClick(); }} className="text-slate-500 hover:text-cyan-600 text-sm">
+            Acceso administrador
+          </a>
+        </div> 
       </div> 
-    </div> 
+    </div>
   );
 }
 
@@ -693,7 +731,7 @@ function AdminLogin({ onLogin, onBack, error, loading = false }: AdminLoginProps
               Conectando...
             </div>
           ) : (
-            'Entrar'
+            'Iniciar sesión'
           )}
         </button> 
       </form> 
@@ -716,13 +754,13 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
         <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Crear nueva sesión">
             <form onSubmit={handleCreate} className="space-y-4">
                 <input type="text" placeholder="Nombre de la sesión" value={sessionName} onChange={e => setSessionName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" required />
-                <textarea placeholder="Lista de miembros (Nombre, email@opcional.com)" value={membersList} onChange={e => setMembersList(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" rows={5} required></textarea>
-                <div className="flex justify-end gap-3"><button type="button" onClick={() => setShowCreate(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg">Cancelar</button><button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Crear</button></div>
+                <textarea placeholder="Lista de miembros (Nombre, email@opcional.com) Agrega una única persona por línea." value={membersList} onChange={e => setMembersList(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" rows={5} required></textarea>
+                <div className="flex gap-3"><button type="button" onClick={() => setShowCreate(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg flex-1">Cancelar</button><button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg flex-1">Crear</button></div>
             </form>
         </Modal>
         <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> 
-            <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-cyan-700">Panel de administrador</h2><button onClick={onLogout} className="text-slate-500 hover:text-slate-800"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></button></div> 
-            <p className="text-slate-500 mb-6 -mt-4">Bienvenido, {user.name}</p> 
+            <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-cyan-700">Panel de administración</h2><button onClick={onLogout} className="text-slate-500 hover:text-slate-800"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></button></div> 
+            <p className="text-slate-500 mb-6 -mt-4"><strong>¡Bienvenido, {user.name}!</strong> Para crear elecciones primero debes crear una sesión de votaciones, en la cual podrás añadir votantes y elecciones.</p> 
             <div className="flex flex-col sm:flex-row gap-4 mb-6">
                 <button onClick={() => setShowCreate(true)} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg shadow-md"><PlusIcon /> Crear nueva sesión</button> 
                 {user.role === 'superadmin' && <button onClick={onManageAdmins} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 text-white font-bold py-3 rounded-lg shadow-md"><UsersIcon /> Gestionar admins</button>}
@@ -777,7 +815,7 @@ function SessionManagement({ session, votes, onAccredit, onToggleEligibility, on
             <button onClick={onBack} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold"><ArrowLeftIcon /> Volver al panel</button>
             <h2 className="text-2xl font-bold text-cyan-700 mb-4">{session.name}</h2>
             <div className="border-b border-slate-200 mb-4 flex gap-2"> <TabButton tabName="acreditacion" label="Acreditación" /> <TabButton tabName="elecciones" label="Elecciones" /> </div>
-            {activeTab === 'acreditacion' && ( <div> <input type="text" placeholder="Buscar miembro..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-4"/> <div className="space-y-2 max-h-64 overflow-y-auto pr-2 mb-4"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between"> <div><p className="font-semibold">{member.name}</p><p className={`text-sm ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Acreditar</button> : <div className="flex items-center gap-2"><span className="font-mono bg-slate-200 px-2 py-1 rounded text-sm">{member.key}</span><button onClick={() => session.id && member.id && onToggleEligibility(session.id, member.id)} className={`text-sm p-1 rounded-full ${member.isEligible ? 'text-green-600' : 'text-red-600'}`}>{member.isEligible ? <CheckCircleIcon/> : <XCircleIcon/>}</button></div>} </div> ))} </div> <div className="border-t border-slate-200 pt-4"> <h4 className="font-semibold text-slate-700 mb-2">Añadir nuevos miembros</h4> <form onSubmit={handleAddMembers} className="space-y-2"> <textarea value={newMembersList} onChange={e => setNewMembersList(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" placeholder="Nombre, email@opcional.com"></textarea> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg">Añadir</button> </form> </div> <button onClick={downloadMemberList} disabled={!isXlsxLoaded} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg shadow disabled:opacity-50"><DownloadIcon /> Descargar lista</button> </div> )}
+            {activeTab === 'acreditacion' && ( <div> <input type="text" placeholder="Buscar miembro..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-4"/> <div className="space-y-2 max-h-64 overflow-y-auto pr-2 mb-4"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between"> <div><p className="font-semibold">{member.name}</p><p className={`text-sm ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Acreditar</button> : <div className="flex items-center gap-2"><span className="font-mono bg-slate-200 px-2 py-1 rounded text-sm">{member.key}</span><button onClick={() => session.id && member.id && onToggleEligibility(session.id, member.id)} className={`text-sm p-1 rounded-full ${member.isEligible ? 'text-green-600' : 'text-red-600'}`}>{member.isEligible ? <CheckCircleIcon/> : <XCircleIcon/>}</button></div>} </div> ))} </div> <div className="border-t border-slate-200 pt-4"> <h4 className="font-semibold text-slate-700 mb-2">Añadir nuevos miembros</h4> <form onSubmit={handleAddMembers} className="space-y-2"> <textarea value={newMembersList} onChange={e => setNewMembersList(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" placeholder="Nombre, email@opcional.com - Solo una persona por línea"></textarea> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg">Añadir</button> </form> </div> <button onClick={downloadMemberList} disabled={!isXlsxLoaded} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg shadow disabled:opacity-50"><DownloadIcon /> Descargar lista</button> </div> )}
             {activeTab === 'elecciones' && ( <div> <div className="space-y-3"> {Object.values(session.elections).map(election => {
                 const totalPapeletas = session.members.filter(m => m.status === 'Presente').length;
                 const votesCount = Object.values(votes).map(v => election.id ? v[election.id] : undefined).filter(Boolean).length;
