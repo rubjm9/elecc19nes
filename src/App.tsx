@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FirestoreService } from './firebase/firestoreService';
 import type { 
   FirestoreAdmin, 
@@ -638,7 +638,26 @@ export default function App() {
     }
   };
 
-  return ( <> <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,700;9..40,900&display=swap');`}</style> <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-100 flex items-center justify-center p-4 font-sans" style={{ fontFamily: "'DM Sans', sans-serif" }}> <div className="w-full max-w-md">{renderPage()}</div> </div> </> );
+  return ( <> <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,700;9..40,900&display=swap');
+
+    @keyframes gradientShift {
+      0% {
+        background-position: 0% 50%;
+      }
+      50% {
+        background-position: 100% 50%;
+      }
+      100% {
+        background-position: 0% 50%;
+      }
+    }
+
+    .animated-gradient {
+      background: linear-gradient(135deg,rgb(213, 252, 254) 0%,rgb(245, 250, 250) 50%,rgb(187, 247, 252) 100%);
+      background-size: 200% 200%;
+      animation: gradientShift 12s ease-in-out infinite;
+    }
+  `}</style> <div className="min-h-screen animated-gradient flex items-center justify-center p-4 font-sans" style={{ fontFamily: "'DM Sans', sans-serif" }}> <div className="w-full max-w-md">{renderPage()}</div> </div> </> );
 }
 
 // --- Componentes de Página ---
@@ -690,6 +709,15 @@ function HomePage({ onLogin, onAdminClick, error, loading = false }: HomePagePro
 function AdminLogin({ onLogin, onBack, error, loading = false }: AdminLoginProps) {
   const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
+  const usernameInputRef = useRef<HTMLInputElement>(null);
+  
+  // Foco automático en el input del nombre de usuario
+  useEffect(() => {
+    if (usernameInputRef.current) {
+      usernameInputRef.current.focus();
+    }
+  }, []);
+  
   const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (!loading) onLogin(username, password); };
   return ( 
     <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200"> 
@@ -701,6 +729,7 @@ function AdminLogin({ onLogin, onBack, error, loading = false }: AdminLoginProps
         <div className="relative">
           <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400"><UserIcon /></span>
           <input 
+            ref={usernameInputRef}
             type="text" 
             value={username} 
             onChange={(e) => setUsername(e.target.value)} 
@@ -751,7 +780,7 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
     const userSessions = (user.role === 'superadmin' ? Object.values(db.sessions) : Object.values(db.sessions).filter((s: Session) => s.createdBy === user.username));
     
     return ( <>
-        <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Crear nueva sesión">
+        <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Nueva sesión">
             <form onSubmit={handleCreate} className="space-y-4">
                 <input type="text" placeholder="Nombre de la sesión" value={sessionName} onChange={e => setSessionName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" required />
                 <textarea placeholder="Lista de miembros (Nombre, email@opcional.com) Agrega una única persona por línea." value={membersList} onChange={e => setMembersList(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" rows={5} required></textarea>
@@ -762,7 +791,7 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
             <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-cyan-700">Panel de administración</h2><button onClick={onLogout} className="text-slate-500 hover:text-slate-800"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></button></div> 
             <p className="text-slate-500 mb-6 -mt-4"><strong>¡Bienvenido, {user.name}!</strong> Para crear elecciones primero debes crear una sesión de votaciones, en la cual podrás añadir votantes y elecciones.</p> 
             <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                <button onClick={() => setShowCreate(true)} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg shadow-md"><PlusIcon /> Crear nueva sesión</button> 
+                <button onClick={() => setShowCreate(true)} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg shadow-md"><PlusIcon /> Nueva sesión</button> 
                 {user.role === 'superadmin' && <button onClick={onManageAdmins} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 text-white font-bold py-3 rounded-lg shadow-md"><UsersIcon /> Gestionar admins</button>}
             </div>
             <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Sesiones de votación</h3> 
