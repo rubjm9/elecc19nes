@@ -8,9 +8,9 @@ import type {
 } from './firebase/firestoreService';
 
 // --- Iconos SVG ---
-const LockIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>;
+const ArrowLeftIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>;
 const UserIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>;
-const ArrowLeftIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>;
+const LockIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>;
 const PlusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
 const CheckCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>;
 const XCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>;
@@ -653,11 +653,29 @@ export default function App() {
     }
 
     .animated-gradient {
-      background: linear-gradient(135deg,rgb(213, 252, 254) 0%,rgb(245, 250, 250) 50%,rgb(187, 247, 252) 100%);
+      background: linear-gradient(135deg,rgb(213, 252, 254) 0%,rgb(244, 253, 253) 50%,rgb(187, 247, 252) 100%);
       background-size: 200% 200%;
       animation: gradientShift 12s ease-in-out infinite;
     }
-  `}</style> <div className="min-h-screen animated-gradient flex items-center justify-center p-4 font-sans" style={{ fontFamily: "'DM Sans', sans-serif" }}> <div className="w-full max-w-md">{renderPage()}</div> </div> </> );
+  `}</style> <div className="min-h-screen animated-gradient flex flex-col font-sans" style={{ fontFamily: "'DM Sans', sans-serif" }}> 
+    {/* Contenido principal centrado con H1 integrado */}
+    <div className="flex-1 flex flex-col items-center justify-center p-4">
+      {/* H1 integrado en el contenido principal */}
+      <h1 
+        onClick={() => setPage('home')} 
+        className="text-5xl tracking-wider text-cyan-600 cursor-pointer hover:text-cyan-700 transition-colors mb-6" 
+        style={{fontWeight: 900}}
+        title="Haz clic para volver a la portada"
+      >
+        ELECC19NES
+      </h1>
+      
+      {/* Contenido de la página */}
+      <div className="w-full max-w-md">
+        {renderPage()}
+      </div>
+    </div>
+  </div> </> );
 }
 
 // --- Componentes de Página ---
@@ -666,7 +684,6 @@ function HomePage({ onLogin, onAdminClick, error, loading = false }: HomePagePro
   const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (key && !loading) onLogin(key); };
   return ( 
     <div className="text-center"> 
-      <h1 className="text-5xl tracking-wider text-cyan-600 mb-2" style={{fontWeight: 900}}>ELECC19NES</h1> 
       <div className="bg-white rounded-2xl shadow-xl p-8 space-y-6">
         <h2 className="text-2xl font-bold text-slate-800 mb-2">Acceso de votantes</h2>
         <p className="text-slate-500 mb-8">Introduce tu clave de sesión para participar</p> 
@@ -721,9 +738,9 @@ function AdminLogin({ onLogin, onBack, error, loading = false }: AdminLoginProps
   const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (!loading) onLogin(username, password); };
   return ( 
     <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200"> 
-      <button onClick={() => !loading && onBack()} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold disabled:opacity-50" disabled={loading}>
-        <ArrowLeftIcon /> Volver
-      </button> 
+      <NavigationButton onClick={() => !loading && onBack()} variant="back" className="mb-4" disabled={loading}>
+        Volver
+      </NavigationButton> 
       <h2 className="text-2xl font-bold mb-6 text-center text-cyan-700">Acceso administrador</h2> 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4"> 
         <div className="relative">
@@ -788,7 +805,7 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
             </form>
         </Modal>
         <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> 
-            <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-cyan-700">Panel de administración</h2><button onClick={onLogout} className="text-slate-500 hover:text-slate-800"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></button></div> 
+            <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-cyan-700">Panel de administración</h2><NavigationButton onClick={onLogout} variant="exit">Cerrar sesión</NavigationButton></div> 
             <p className="text-slate-500 mb-6 -mt-4"><strong>¡Bienvenido, {user.name}!</strong> Para crear elecciones primero debes crear una sesión de votaciones, en la cual podrás añadir votantes y elecciones.</p> 
             <div className="flex flex-col sm:flex-row gap-4 mb-6">
                 <button onClick={() => setShowCreate(true)} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg shadow-md"><PlusIcon /> Nueva sesión</button> 
@@ -841,7 +858,7 @@ function SessionManagement({ session, votes, onAccredit, onToggleEligibility, on
             </div>
         </Modal>}
         <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md">
-            <button onClick={onBack} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold"><ArrowLeftIcon /> Volver al panel</button>
+            <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton>
             <h2 className="text-2xl font-bold text-cyan-700 mb-4">{session.name}</h2>
             <div className="border-b border-slate-200 mb-4 flex gap-2"> <TabButton tabName="acreditacion" label="Acreditación" /> <TabButton tabName="elecciones" label="Elecciones" /> </div>
             {activeTab === 'acreditacion' && ( <div> <input type="text" placeholder="Buscar miembro..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-4"/> <div className="space-y-2 max-h-64 overflow-y-auto pr-2 mb-4"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between"> <div><p className="font-semibold">{member.name}</p><p className={`text-sm ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Acreditar</button> : <div className="flex items-center gap-2"><span className="font-mono bg-slate-200 px-2 py-1 rounded text-sm">{member.key}</span><button onClick={() => session.id && member.id && onToggleEligibility(session.id, member.id)} className={`text-sm p-1 rounded-full ${member.isEligible ? 'text-green-600' : 'text-red-600'}`}>{member.isEligible ? <CheckCircleIcon/> : <XCircleIcon/>}</button></div>} </div> ))} </div> <div className="border-t border-slate-200 pt-4"> <h4 className="font-semibold text-slate-700 mb-2">Añadir nuevos miembros</h4> <form onSubmit={handleAddMembers} className="space-y-2"> <textarea value={newMembersList} onChange={e => setNewMembersList(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" placeholder="Nombre, email@opcional.com - Solo una persona por línea"></textarea> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg">Añadir</button> </form> </div> <button onClick={downloadMemberList} disabled={!isXlsxLoaded} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg shadow disabled:opacity-50"><DownloadIcon /> Descargar lista</button> </div> )}
@@ -869,7 +886,7 @@ function VoterSessionView({ session, votes, onVoteClick, onExit }: VoterSessionV
     };
     return (
         <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md">
-            <div className="flex justify-between items-center"> <h2 className="text-2xl font-bold text-cyan-700 mb-2">{session.name}</h2> <button onClick={onExit} className="text-sm text-slate-500 hover:text-cyan-600">Salir</button> </div>
+            <div className="flex justify-between items-center"> <h2 className="text-2xl font-bold text-cyan-700 mb-2">{session.name}</h2> <NavigationButton onClick={onExit} variant="exit" className="text-sm">Salir</NavigationButton> </div>
             <p className="text-slate-500 mb-6">Selecciona una votación para participar.</p>
             <div className="space-y-3">
                 {Object.values(session.elections).map(election => {
@@ -901,7 +918,7 @@ function BallotPage({ session, election, voterKey, previousVotes, onVote, onBack
     useEffect(() => { if (selections.length === 0) setSelections(Array(election.positionsToElect).fill('')); }, [election.positionsToElect, selections.length]);
     const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); setError(''); if (selections.some((s: string) => s === '')) { setError('Debes seleccionar un candidato para cada puesto.'); return; } const uniqueSelections = new Set(selections.filter((s: string) => s !== '')); if (uniqueSelections.size !== selections.filter((s: string) => s !== '').length) { setError('No puedes votar por la misma persona más de una vez.'); return; } if (session.id && election.id) onVote(voterKey, session.id, election.id, selections); };
     const candidates = election.candidates ? session.members.filter((m: Member) => election.candidates!.includes(m.name)) : session.members.filter((m: Member) => m.status === 'Presente' && m.isEligible);
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200"> <button onClick={onBack} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold"><ArrowLeftIcon /> Volver a la sesión</button> <h2 className="text-2xl font-bold mb-2 text-cyan-700">{election.name}</h2> <p className="text-slate-500 mb-4 italic">{election.description}</p> {previousVotes.length > 0 && (<div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-r-lg"><p className="font-bold">Ya has votado en esta elección.</p><p className="text-sm">Puedes modificar tu voto hasta que se cierre la votación.</p></div>)} <p className="text-slate-500 mb-6">Debes elegir a {election.positionsToElect} persona(s).</p> <form onSubmit={handleSubmit} className="flex flex-col gap-4"> {[...Array(election.positionsToElect)].map((_, index) => ( <div key={index}> <label className="block text-sm font-medium text-slate-600 mb-1">Voto {index + 1}</label> <select value={selections[index] || ''} onChange={e => {const newS = [...selections]; newS[index] = e.target.value; setSelections(newS);}} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3"> <option value="" disabled>Selecciona una persona...</option> {candidates.map(c => <option key={c.id} value={c.name}>{c.name}</option>)} </select> </div> ))} {error && <p className="text-red-500 mt-4 text-center">{error}</p>} <button type="submit" className="mt-4 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg shadow-md">{previousVotes.length > 0 ? 'Modificar papeleta' : 'Emitir mi voto'}</button> </form> </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a la sesión</NavigationButton> <h2 className="text-2xl font-bold mb-2 text-cyan-700">{election.name}</h2> <p className="text-slate-500 mb-4 italic">{election.description}</p> {previousVotes.length > 0 && (<div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-r-lg"><p className="font-bold">Ya has votado en esta elección.</p><p className="text-sm">Puedes modificar tu voto hasta que se cierre la votación.</p></div>)} <p className="text-slate-500 mb-6">Debes elegir a {election.positionsToElect} persona(s).</p> <form onSubmit={handleSubmit} className="flex flex-col gap-4"> {[...Array(election.positionsToElect)].map((_, index) => ( <div key={index}> <label className="block text-sm font-medium text-slate-600 mb-1">Voto {index + 1}</label> <select value={selections[index] || ''} onChange={e => {const newS = [...selections]; newS[index] = e.target.value; setSelections(newS);}} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3"> <option value="" disabled>Selecciona una persona...</option> {candidates.map(c => <option key={c.id} value={c.name}>{c.name}</option>)} </select> </div> ))} {error && <p className="text-red-500 mt-4 text-center">{error}</p>} <button type="submit" className="mt-4 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg shadow-md">{previousVotes.length > 0 ? 'Modificar papeleta' : 'Emitir mi voto'}</button> </form> </div> );
 }
 
 function VoteSuccessPage({ onBackToSession, onExit }: VoteSuccessPageProps) { 
@@ -911,8 +928,8 @@ function VoteSuccessPage({ onBackToSession, onExit }: VoteSuccessPageProps) {
       <h2 className="text-2xl font-bold text-slate-800">¡Voto registrado con éxito!</h2> 
       <p className="text-slate-500 mt-2 mb-6">Tu voto ha sido guardado.</p> 
       <div className="flex flex-col gap-3"> 
-        <button onClick={onBackToSession} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Volver a la sesión</button> 
-        <button onClick={onExit} className="text-slate-500 hover:text-cyan-600 text-sm">Salir (votar como otro usuario)</button> 
+        <NavigationButton onClick={onBackToSession} variant="back" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Volver a la sesión</NavigationButton> 
+        <NavigationButton onClick={onExit} variant="exit" className="text-sm">Salir (votar como otro usuario)</NavigationButton> 
       </div> 
     </div> 
   ); 
@@ -943,7 +960,7 @@ function ResultsPage({ session, election, votes, onBack, onAddElection }: Result
         onBack();
     };
 
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <button onClick={onBack} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold"><ArrowLeftIcon /> Volver a gestión</button> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && <div className="my-4"><button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button></div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a gestión</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && <div className="my-4"><button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button></div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
 }
 
 function SuperAdminPanel({ admins, onAddAdmin, onDeleteAdmin, onBack }: SuperAdminPanelProps) {
@@ -952,5 +969,38 @@ function SuperAdminPanel({ admins, onAddAdmin, onDeleteAdmin, onBack }: SuperAdm
     const [name, setName] = useState<string>('');
     const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (!username || !password || !name) { alert('Por favor, completa todos los campos.'); return; } onAddAdmin(username, password, name); setUsername(''); setPassword(''); setName(''); };
     const managerAdmins = Object.entries(admins).filter(([, details]: [string, Admin]) => details.role === 'manager');
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <button onClick={onBack} className="flex items-center gap-2 text-cyan-600 mb-4 hover:text-cyan-700 font-bold"><ArrowLeftIcon /> Volver al panel</button> <h2 className="text-2xl font-bold text-cyan-700 mb-4">Gestionar administradores</h2> <div className="mb-6 border-t border-slate-200 pt-4"> <h3 className="text-lg font-semibold text-slate-700 mb-2">Crear nuevo administrador</h3> <form onSubmit={handleSubmit} className="space-y-3"> <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre completo" /> <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre de usuario" /> <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Contraseña" /> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg shadow">Crear administrador</button> </form> </div> <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Lista de administradores</h3> <div className="space-y-2 max-h-60 overflow-y-auto pr-2"> {managerAdmins.map(([adminId, details]) => ( <div key={adminId} className="bg-slate-100 p-3 rounded-lg flex justify-between items-center"> <div> <p className="font-semibold text-slate-800">{details.name}</p> <p className="text-sm text-slate-500">Usuario: {details.username}</p> </div> <button onClick={() => onDeleteAdmin(adminId, details.name)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded-lg text-sm flex items-center gap-1 transition-colors"> <XIcon /> Eliminar </button> </div> ))} </div> </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-4">Gestionar administradores</h2> <div className="mb-6 border-t border-slate-200 pt-4"> <h3 className="text-lg font-semibold text-slate-700 mb-2">Crear nuevo administrador</h3> <form onSubmit={handleSubmit} className="space-y-3"> <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre completo" /> <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre de usuario" /> <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Contraseña" /> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg shadow">Crear administrador</button> </form> </div> <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Lista de administradores</h3> <div className="space-y-2 max-h-60 overflow-y-auto pr-2"> {managerAdmins.map(([adminId, details]) => ( <div key={adminId} className="bg-slate-100 p-3 rounded-lg flex justify-between items-center"> <div> <p className="font-semibold text-slate-800">{details.name}</p> <p className="text-sm text-slate-500">Usuario: {details.username}</p> </div> <button onClick={() => onDeleteAdmin(adminId, details.name)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded-lg text-sm flex items-center gap-1 transition-colors"> <XIcon /> Eliminar </button> </div> ))} </div> </div> );
 }
+
+
+
+// Componente de navegación unificado (para volver y salir)
+const NavigationButton = ({ 
+  onClick, 
+  children, 
+  variant = "back", 
+  className = "", 
+  disabled = false 
+}: { 
+  onClick: () => void, 
+  children: React.ReactNode, 
+  variant?: "back" | "exit", 
+  className?: string, 
+  disabled?: boolean 
+}) => {
+  const baseClasses = "flex items-center gap-2 font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+  const variantClasses = variant === "back" 
+    ? "text-cyan-600 hover:text-cyan-700" 
+    : "text-slate-500 hover:text-cyan-600";
+  
+  return (
+    <button 
+      onClick={onClick} 
+      disabled={disabled}
+      className={`${baseClasses} ${variantClasses} ${className}`}
+    >
+      {variant === "back" ? <ArrowLeftIcon /> : null}
+      {children}
+    </button>
+  );
+};
