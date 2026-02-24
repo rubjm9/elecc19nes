@@ -51,6 +51,8 @@ export interface FirestoreSession {
   name: string;
   createdBy: string;
   createdAt?: Timestamp;
+  /** Orden de visualización de elecciones (ids). Si no existe, se usa orden por createdAt. */
+  electionOrder?: string[];
 }
 
 export interface FirestoreVote {
@@ -190,6 +192,42 @@ export class FirestoreService {
     }
   }
 
+  static async updateSession(sessionId: string, updates: Partial<Pick<FirestoreSession, 'electionOrder' | 'name'>>) {
+    try {
+      const sessionRef = doc(db, 'sessions', sessionId);
+      await updateDoc(sessionRef, updates);
+      return true;
+    } catch (error) {
+      console.error('Error updating session:', error);
+      throw error;
+    }
+  }
+
+  static async deleteSession(sessionId: string) {
+    try {
+      const [votesQ, electionsQ, membersQ] = [
+        query(collection(db, 'votes'), where('sessionId', '==', sessionId)),
+        query(collection(db, 'elections'), where('sessionId', '==', sessionId)),
+        query(collection(db, 'members'), where('sessionId', '==', sessionId))
+      ];
+      const [votesSnap, electionsSnap, membersSnap] = await Promise.all([
+        getDocs(votesQ),
+        getDocs(electionsQ),
+        getDocs(membersQ)
+      ]);
+      const batch = writeBatch(db);
+      votesSnap.docs.forEach((d) => batch.delete(d.ref));
+      electionsSnap.docs.forEach((d) => batch.delete(d.ref));
+      membersSnap.docs.forEach((d) => batch.delete(d.ref));
+      batch.delete(doc(db, 'sessions', sessionId));
+      await batch.commit();
+      return true;
+    } catch (error) {
+      console.error('Error deleting session:', error);
+      throw error;
+    }
+  }
+
   // === MIEMBROS ===
   static async createMember(member: Omit<FirestoreMember, 'id' | 'createdAt'>) {
     try {
@@ -267,6 +305,16 @@ export class FirestoreService {
     }
   }
 
+  static async deleteMember(memberId: string) {
+    try {
+      await deleteDoc(doc(db, 'members', memberId));
+      return true;
+    } catch (error) {
+      console.error('Error deleting member:', error);
+      throw error;
+    }
+  }
+
   // === ELECCIONES ===
   static async createElection(election: Omit<FirestoreElection, 'id' | 'createdAt'>) {
     try {
@@ -304,6 +352,21 @@ export class FirestoreService {
       await updateDoc(electionRef, updates);
     } catch (error) {
       console.error('Error updating election:', error);
+      throw error;
+    }
+  }
+
+  static async deleteElection(electionId: string) {
+    try {
+      const votesQ = query(collection(db, 'votes'), where('electionId', '==', electionId));
+      const votesSnap = await getDocs(votesQ);
+      const batch = writeBatch(db);
+      votesSnap.docs.forEach((d) => batch.delete(d.ref));
+      batch.delete(doc(db, 'elections', electionId));
+      await batch.commit();
+      return true;
+    } catch (error) {
+      console.error('Error deleting election:', error);
       throw error;
     }
   }

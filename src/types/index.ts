@@ -66,6 +66,7 @@ export interface SessionManagementProps {
   onAddMembers: (sessionId: string, membersList: string) => void;
   onBack: () => void;
   onViewResults: (electionId: string) => void;
+  onReorderElections?: (sessionId: string, electionIds: string[]) => void;
   isXlsxLoaded: boolean;
 }
 
@@ -74,6 +75,7 @@ export interface VoterSessionViewProps {
   votes: { [electionId: string]: string[] };
   onVoteClick: (electionId: string) => void;
   onExit: () => void;
+  onViewResults?: (electionId: string) => void;
 }
 
 export interface BallotPageProps {
@@ -96,7 +98,8 @@ export interface ResultsPageProps {
   election: Election;
   votes: Database['votes'];
   onBack: () => void;
-  onAddElection: (sessionId: string, electionData: Omit<Election, 'id'>) => void;
+  onAddElection?: (sessionId: string, electionData: Omit<Election, 'id'>) => void;
+  voterView?: boolean;
 }
 
 export interface SuperAdminPanelProps {

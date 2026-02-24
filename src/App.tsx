@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { FirestoreService } from './firebase/firestoreService';
 import { useRealtimeVotes, useRealtimeSession } from './hooks/useRealtimeData';
+import { getElectionsOrdered } from './utils';
 import { VoterSessionView } from './components/VoterSessionView';
+import { ConfirmDeleteModal } from './components/ui';
 import type { 
   FirestoreAdmin, 
   FirestoreMember, 
@@ -20,6 +22,7 @@ const UsersIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" heigh
 
 const DownloadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>;
 const XIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 6-12 12"></path><path d="m6 6 12 12"></path></svg>;
+const ClockIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>;
 
 // --- Tipos TypeScript (usando tipos de Firestore) ---
 interface Admin extends FirestoreAdmin {}
@@ -71,6 +74,7 @@ interface AdminDashboardProps {
   onCreateSession: (sessionName: string, membersList: string) => void;
   onManageAdmins: () => void;
   onLogout: () => void;
+  onDeleteSession?: (sessionId: string) => void;
 }
 
 interface SessionManagementProps {
@@ -83,7 +87,11 @@ interface SessionManagementProps {
   onAddMembers: (sessionId: string, membersList: string) => void;
   onBack: () => void;
   onViewResults: (electionId: string) => void;
+  onReorderElections?: (sessionId: string, electionIds: string[]) => void;
   isXlsxLoaded: boolean;
+  user?: User | null;
+  onDeleteMember?: (sessionId: string, memberId: string) => void;
+  onDeleteElection?: (sessionId: string, electionId: string) => void;
 }
 
 interface BallotPageProps {
@@ -105,7 +113,9 @@ interface ResultsPageProps {
   election: Election;
   votes: Database['votes'];
   onBack: () => void;
-  onAddElection: (sessionId: string, electionData: Omit<Election, 'id'>) => void;
+  onAddElection?: (sessionId: string, electionData: Omit<Election, 'id'>) => void;
+  onViewTiebreaker?: (electionId: string) => void;
+  voterView?: boolean;
 }
 
 interface SuperAdminPanelProps {
@@ -161,6 +171,38 @@ export default function App() {
   // Estados de carga para Firestore
   const [loading, setLoading] = useState<boolean>(false);
   const [initializing, setInitializing] = useState<boolean>(true);
+
+  // Datos en tiempo real de la sesión actual (para sync con db y que acreditar/ballot/results funcionen entre ventanas)
+  const { session: realtimeSessionData, members: realtimeMembers, elections: realtimeElections } = useRealtimeSession(currentSessionId);
+
+  // Fusionar sesión en tiempo real en db para currentSessionId (solo esa sesión)
+  useEffect(() => {
+    if (!currentSessionId) return;
+    const hasRealtime = realtimeSessionData || realtimeMembers.length > 0 || Object.keys(realtimeElections).length > 0;
+    if (!hasRealtime) return;
+    setDb((prev) => {
+      const existing = prev.sessions[currentSessionId];
+      const hasRealtimeMembers = realtimeMembers.length > 0;
+      const hasRealtimeElections = Object.keys(realtimeElections).length > 0;
+      const nextMembers = hasRealtimeMembers ? realtimeMembers : (existing?.members ?? []);
+      const nextElections = hasRealtimeElections ? realtimeElections : (existing?.elections ?? {});
+      const base = existing ?? { id: currentSessionId, name: '', createdBy: '', members: [], elections: {} };
+      if (base.members === nextMembers && base.elections === nextElections) return prev;
+      return {
+        ...prev,
+        sessions: {
+          ...prev.sessions,
+          [currentSessionId]: {
+            ...base,
+            ...(realtimeSessionData || {}),
+            id: currentSessionId,
+            members: nextMembers,
+            elections: nextElections
+          }
+        }
+      };
+    });
+  }, [currentSessionId, realtimeSessionData, realtimeMembers, realtimeElections]);
 
   // Inicialización
   useEffect(() => {
@@ -561,6 +603,86 @@ export default function App() {
       setLoading(false);
     }
   };
+
+  const reorderElections = async (sessionId: string, electionIds: string[]) => {
+    try {
+      await FirestoreService.updateSession(sessionId, { electionOrder: electionIds });
+      setDb((prev: Database) => {
+        const newDb = JSON.parse(JSON.stringify(prev));
+        if (newDb.sessions[sessionId]) newDb.sessions[sessionId].electionOrder = electionIds;
+        return newDb;
+      });
+    } catch (error) {
+      console.error('Error reordering elections:', error);
+      setError('Error al reordenar elecciones');
+    }
+  };
+
+  const deleteSession = async (sessionId: string) => {
+    try {
+      setLoading(true);
+      const session = db.sessions[sessionId];
+      const electionIds = session ? Object.keys(session.elections || {}) : [];
+      await FirestoreService.deleteSession(sessionId);
+      setDb((prev: Database) => {
+        const newDb = JSON.parse(JSON.stringify(prev));
+        delete newDb.sessions[sessionId];
+        Object.keys(newDb.votes).forEach((voterKey) => {
+          electionIds.forEach((eid: string) => { delete newDb.votes[voterKey][eid]; });
+          if (Object.keys(newDb.votes[voterKey]).length === 0) delete newDb.votes[voterKey];
+        });
+        return newDb;
+      });
+    } catch (error) {
+      console.error('Error deleting session:', error);
+      setError('Error al eliminar la sesión');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteMember = async (sessionId: string, memberId: string) => {
+    try {
+      setLoading(true);
+      const session = db.sessions[sessionId];
+      const member = session?.members?.find((m: Member) => m.id === memberId);
+      await FirestoreService.deleteMember(memberId);
+      setDb((prev: Database) => {
+        const newDb = JSON.parse(JSON.stringify(prev));
+        if (newDb.sessions[sessionId]?.members) {
+          newDb.sessions[sessionId].members = newDb.sessions[sessionId].members.filter((m: Member) => m.id !== memberId);
+        }
+        if (member?.key) delete newDb.votes[member.key];
+        return newDb;
+      });
+    } catch (error) {
+      console.error('Error deleting member:', error);
+      setError('Error al eliminar al elector');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteElection = async (sessionId: string, electionId: string) => {
+    try {
+      setLoading(true);
+      await FirestoreService.deleteElection(electionId);
+      setDb((prev: Database) => {
+        const newDb = JSON.parse(JSON.stringify(prev));
+        if (newDb.sessions[sessionId]?.elections) delete newDb.sessions[sessionId].elections[electionId];
+        Object.keys(newDb.votes).forEach((voterKey) => {
+          if (newDb.votes[voterKey][electionId]) delete newDb.votes[voterKey][electionId];
+        });
+        return newDb;
+      });
+    } catch (error) {
+      console.error('Error deleting election:', error);
+      setError('Error al eliminar la elección');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const addElectionToSession = async (sessionId: string, electionData: Omit<Election, 'id'>) => { 
     try {
       setLoading(true);
@@ -638,45 +760,22 @@ export default function App() {
     }
   };
 
-  const deleteAdmin = async (adminId: string, adminName: string) => {
+  const deleteAdmin = async (adminId: string, _adminName: string) => {
     try {
-      console.log('Iniciando eliminación de administrador:', { adminId, adminName });
-      console.log('Estado actual de admins:', db.admins);
-      
-      // Confirmar eliminación
-      const confirmed = window.confirm(`¿Estás seguro de que quieres eliminar al administrador "${adminName}"?\n\nEsta acción no se puede deshacer.`);
-      if (!confirmed) {
-        console.log('Eliminación cancelada por el usuario');
-        return;
-      }
-
-      console.log('Confirmación aceptada, procediendo con la eliminación...');
       setLoading(true);
       
-      // Verificar que el adminId existe en el estado local
       if (!db.admins[adminId]) {
-        console.error('No se encontró el administrador en el estado local con la clave:', adminId);
-        console.log('Claves disponibles:', Object.keys(db.admins));
         setError('Error: No se pudo identificar el administrador');
         return;
       }
       
-      console.log('Administrador encontrado en estado local:', db.admins[adminId]);
-      
-      // Obtener el ID del documento de Firestore
       const firestoreId = db.admins[adminId].id;
       if (!firestoreId) {
-        console.error('No se encontró el ID de Firestore para el administrador');
         setError('Error: No se pudo identificar el administrador en la base de datos');
         return;
       }
       
-      console.log('ID de Firestore encontrado:', firestoreId);
-      
-      // Llamar al servicio con el ID del documento de Firestore
-      console.log('Llamando a FirestoreService.deleteAdmin...');
       await FirestoreService.deleteAdmin(firestoreId);
-      console.log('Administrador eliminado exitosamente en Firestore');
 
       // Actualizar el estado local directamente
       console.log('Actualizando estado local...');
@@ -714,16 +813,16 @@ export default function App() {
       case 'adminLogin': return <AdminLogin onLogin={handleAdminLogin} onBack={() => setPage('home')} error={error} loading={loading} />;
       case 'adminDashboard': 
         if (!user) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
-        return <AdminDashboard user={user} db={db} onManageSession={(id: string) => { setCurrentSessionId(id); setPage('sessionManagement'); }} onCreateSession={createSession} onManageAdmins={() => setPage('superAdminPanel')} onLogout={handleLogout} />;
+        return <AdminDashboard user={user} db={db} onManageSession={(id: string) => { setCurrentSessionId(id); setPage('sessionManagement'); }} onCreateSession={createSession} onManageAdmins={() => setPage('superAdminPanel')} onLogout={handleLogout} onDeleteSession={user?.role === 'superadmin' ? deleteSession : undefined} />;
       case 'superAdminPanel': return <SuperAdminPanel admins={db.admins} onAddAdmin={addAdmin} onDeleteAdmin={deleteAdmin} onBack={() => setPage('adminDashboard')} />;
       case 'sessionManagement': 
         if (!currentSessionId || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
-        return <SessionManagement session={db.sessions[currentSessionId]} votes={db.votes} onAccredit={accreditMember} onToggleEligibility={toggleMemberEligibility} onChangeElectionStatus={changeElectionStatus} onAddElection={addElectionToSession} onAddMembers={addMembersToSession} onBack={() => setPage('adminDashboard')} onViewResults={(elecId: string) => { setCurrentElectionId(elecId); setPage('results'); }} isXlsxLoaded={isXlsxLoaded}/>;
+        return <SessionManagement session={db.sessions[currentSessionId]} votes={db.votes} onAccredit={accreditMember} onToggleEligibility={toggleMemberEligibility} onChangeElectionStatus={changeElectionStatus} onAddElection={addElectionToSession} onAddMembers={addMembersToSession} onBack={() => setPage('adminDashboard')} onViewResults={(elecId: string) => { setCurrentElectionId(elecId); setPage('results'); }} onReorderElections={reorderElections} isXlsxLoaded={isXlsxLoaded} user={user?.role === 'superadmin' ? user : undefined} onDeleteMember={user?.role === 'superadmin' ? deleteMember : undefined} onDeleteElection={user?.role === 'superadmin' ? deleteElection : undefined}/>;
       case 'voterSession': 
         if (!currentSessionId || !voterKey || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
         // Asegurar que la sesión tenga el id correcto
         const sessionForVoter = { ...db.sessions[currentSessionId], id: currentSessionId };
-        return <VoterSessionView session={sessionForVoter} votes={db.votes[voterKey] || {}} onVoteClick={(elecId: string) => { setCurrentElectionId(elecId); setPage('ballot'); }} onExit={() => { setVoterKey(null); setCurrentSessionId(null); setPage('home'); }} />;
+        return <VoterSessionView session={sessionForVoter} votes={db.votes[voterKey] || {}} onVoteClick={(elecId: string) => { setCurrentElectionId(elecId); setPage('ballot'); }} onViewResults={(elecId: string) => { setCurrentElectionId(elecId); setPage('voterResults'); }} onExit={() => { setVoterKey(null); setCurrentSessionId(null); setPage('home'); }} />;
       case 'ballot':
         if (!currentSessionId || !currentElectionId || !voterKey || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
         const sessionForBallot = db.sessions[currentSessionId];
@@ -733,12 +832,18 @@ export default function App() {
         const previousVotesForElection = votesForVoter[currentElectionId] || [];
         return <BallotPage session={sessionForBallot} election={electionForBallot} voterKey={voterKey} previousVotes={previousVotesForElection} onVote={castVote} onBack={() => setPage('voterSession')} />;
       case 'voteSuccess': return <VoteSuccessPage onBackToSession={() => { setCurrentElectionId(null); setPage('voterSession'); }} onExit={() => { setVoterKey(null); setCurrentSessionId(null); setPage('home'); }} />;
+      case 'voterResults':
+        if (!currentSessionId || !currentElectionId || !voterKey || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
+        const sessionForVoterResults = db.sessions[currentSessionId];
+        const electionForVoterResults = sessionForVoterResults.elections[currentElectionId];
+        if (!electionForVoterResults) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
+        return <ResultsPage session={sessionForVoterResults} election={electionForVoterResults} votes={db.votes} onBack={() => { setCurrentElectionId(null); setPage('voterSession'); }} voterView />;
       case 'results': 
         if (!currentSessionId || !currentElectionId || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
         const sessionForResults = db.sessions[currentSessionId];
         const electionForResults = sessionForResults.elections[currentElectionId];
         if (!electionForResults) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
-        return <ResultsPage session={sessionForResults} election={electionForResults} votes={db.votes} onBack={() => setPage('sessionManagement')} onAddElection={addElectionToSession}/>;
+        return <ResultsPage session={sessionForResults} election={electionForResults} votes={db.votes} onBack={() => setPage('sessionManagement')} onAddElection={addElectionToSession} onViewTiebreaker={(id) => setCurrentElectionId(id)}/>;
       default: return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
     }
   };
@@ -894,10 +999,11 @@ function AdminLogin({ onLogin, onBack, error, loading = false }: AdminLoginProps
   );
 }
 
-function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAdmins, onLogout }: AdminDashboardProps) {
+function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAdmins, onLogout, onDeleteSession }: AdminDashboardProps) {
     const [showCreate, setShowCreate] = useState<boolean>(false);
     const [sessionName, setSessionName] = useState<string>('');
     const [membersList, setMembersList] = useState<string>('');
+    const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
     const handleCreate = (e: React.FormEvent) => { e.preventDefault(); onCreateSession(sessionName, membersList); setShowCreate(false); setSessionName(''); setMembersList(''); };
     const userSessions = (user.role === 'superadmin' ? Object.values(db.sessions) : Object.values(db.sessions).filter((s: Session) => s.createdBy === user.username));
     
@@ -909,6 +1015,15 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
                 <div className="flex gap-3"><button type="button" onClick={() => setShowCreate(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg flex-1">Cancelar</button><button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg flex-1">Crear</button></div>
             </form>
         </Modal>
+        {onDeleteSession && deleteTarget && (
+          <ConfirmDeleteModal
+            isOpen={!!deleteTarget}
+            onClose={() => setDeleteTarget(null)}
+            onConfirm={() => { if (deleteTarget?.id) onDeleteSession(deleteTarget.id); setDeleteTarget(null); }}
+            title="Eliminar sesión"
+            message={`¿Eliminar la sesión "${deleteTarget.name}"? Esta acción no se puede deshacer.`}
+          />
+        )}
         <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> 
             <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-cyan-700">Panel de administración</h2><NavigationButton onClick={onLogout} variant="exit">Cerrar sesión</NavigationButton></div> 
             <p className="text-slate-500 mb-6 -mt-4"><strong>¡Bienvenido, {user.name}!</strong> Para crear elecciones primero debes crear una sesión de votaciones, en la cual podrás añadir votantes y elecciones.</p> 
@@ -917,12 +1032,12 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
                 {user.role === 'superadmin' && <button onClick={onManageAdmins} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 text-white font-bold py-3 rounded-lg shadow-md"><UsersIcon /> Gestionar admins</button>}
             </div>
             <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Sesiones de votación</h3> 
-            <div className="space-y-4 max-h-96 overflow-y-auto"> {userSessions.length > 0 ? userSessions.map(session => ( <div key={session.id} className="bg-slate-50 border border-slate-200 p-4 rounded-lg"> <div className="flex justify-between items-start"> <div><h4 className="font-bold text-slate-800">{session.name}</h4><p className="text-sm text-slate-500">{session.members.length} miembros</p></div> <button onClick={() => session.id && onManageSession(session.id)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-lg text-sm">Gestionar</button> </div> </div> )) : <p className="text-slate-500 text-center py-4">No has creado ninguna sesión.</p>} </div> 
+            <div className="space-y-4 max-h-96 overflow-y-auto"> {userSessions.length > 0 ? userSessions.map(session => ( <div key={session.id} className="bg-slate-50 border border-slate-200 p-4 rounded-lg relative"> {onDeleteSession && session.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: session.id!, name: session.name }); }} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar sesión"><XIcon /></button>} <div className="flex justify-between items-start"> <div><h4 className="font-bold text-slate-800">{session.name}</h4><p className="text-sm text-slate-500">{session.members.length} miembros</p></div> <button onClick={() => session.id && onManageSession(session.id)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-lg text-sm">Gestionar</button> </div> </div> )) : <p className="text-slate-500 text-center py-4">No has creado ninguna sesión.</p>} </div> 
         </div>
     </> );
 }
 
-function SessionManagement({ session: initialSession, votes: initialVotes, onAccredit, onToggleEligibility, onChangeElectionStatus, onAddElection, onAddMembers, onBack, onViewResults, isXlsxLoaded }: SessionManagementProps) {
+function SessionManagement({ session: initialSession, votes: initialVotes, onAccredit, onToggleEligibility, onChangeElectionStatus, onAddElection, onAddMembers, onBack, onViewResults, onReorderElections, isXlsxLoaded, user, onDeleteMember, onDeleteElection }: SessionManagementProps) {
     // Usar suscripciones en tiempo real
     const { session: realtimeSession, members, elections, loading: _sessionLoading } = useRealtimeSession(initialSession?.id || null);
     const { votes: realtimeVotes, loading: _votesLoading } = useRealtimeVotes(initialSession?.id || null);
@@ -952,6 +1067,26 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
     const [isCloseModalOpen, setCloseModalOpen] = useState<boolean>(false);
     const [electionToManage, setElectionToManage] = useState<Election | null>(null);
     const [isProgressModalOpen, setProgressModalOpen] = useState<boolean>(false);
+    const [draggedElectionId, setDraggedElectionId] = useState<string | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<{ type: 'member' | 'election'; id: string; name: string } | null>(null);
+
+    const electionsList = useMemo(() => getElectionsOrdered(session?.elections || {}, session?.electionOrder), [session?.elections, session?.electionOrder]);
+    const handleDragStart = (electionId: string) => setDraggedElectionId(electionId);
+    const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; };
+    const handleDrop = (e: React.DragEvent, targetElectionId: string) => {
+        e.preventDefault();
+        setDraggedElectionId(null);
+        if (!session?.id || !onReorderElections || !draggedElectionId || draggedElectionId === targetElectionId) return;
+        const ids = electionsList.map((el) => el.id).filter(Boolean) as string[];
+        const fromIdx = ids.indexOf(draggedElectionId);
+        const toIdx = ids.indexOf(targetElectionId);
+        if (fromIdx === -1 || toIdx === -1) return;
+        const newIds = [...ids];
+        newIds.splice(fromIdx, 1);
+        newIds.splice(toIdx, 0, draggedElectionId);
+        onReorderElections(session.id, newIds);
+    };
+    const handleDragEnd = () => setDraggedElectionId(null);
 
     if (!session) {
         return (
@@ -979,6 +1114,7 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
     const accreditedVoters = session.members
         .filter((m: Member) => m.status === 'Presente')
         .sort((a: Member, b: Member) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+    const allMembersSorted = [...session.members].sort((a: Member, b: Member) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
     const votesForElection = electionToManage ? Object.values(votes).map((v: { [electionId: string]: string[] }) => v[electionToManage.id!]).filter(Boolean).length : 0;
     const pendingVoters = accreditedVoters.length - votesForElection;
 
@@ -990,25 +1126,41 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
         </Modal>
         {electionToManage && <Modal isOpen={isProgressModalOpen} onClose={() => setProgressModalOpen(false)} title={`Progreso: ${electionToManage?.name}`}>
             <div className="mt-2"> <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesForElection} / {accreditedVoters.length}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: `${accreditedVoters.length > 0 ? (votesForElection / accreditedVoters.length) * 100 : 0}%` }}></div></div> </div>
-            <h4 className="font-semibold text-slate-700 mt-4 mb-2">Estado de votantes acreditados</h4>
+            <h4 className="font-semibold text-slate-700 mt-4 mb-2">Estado de votantes</h4>
             <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
-                {accreditedVoters.map(member => {
+                {allMembersSorted.map((member: Member) => {
+                    const isPresent = member.status === 'Presente';
                     const hasVoted = votes[member.key] && electionToManage?.id && votes[member.key][electionToManage.id];
-                    return ( <div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between"> <p>{member.name}</p> {hasVoted ? <span className="flex items-center gap-2 text-sm text-green-600"><CheckCircleIcon /> Votó</span> : <span className="flex items-center gap-2 text-sm text-orange-600"><XCircleIcon /> Pendiente</span>} </div>)
+                    return ( <div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between"> <p>{member.name}</p> {hasVoted ? <span className="flex items-center gap-2 text-sm text-green-600"><CheckCircleIcon /> Votó</span> : isPresent ? <span className="flex items-center gap-2 text-sm text-orange-600"><ClockIcon /> Pendiente</span> : <span className="flex items-center gap-2 text-sm text-red-600"><XCircleIcon /> No presente</span>} </div>)
                 })}
             </div>
         </Modal>}
+        {deleteTarget && (user?.role === 'superadmin') && (
+          <ConfirmDeleteModal
+            isOpen={!!deleteTarget}
+            onClose={() => setDeleteTarget(null)}
+            onConfirm={() => {
+              if (!session?.id || !deleteTarget) return;
+              if (deleteTarget.type === 'member' && onDeleteMember) onDeleteMember(session.id, deleteTarget.id);
+              if (deleteTarget.type === 'election' && onDeleteElection) onDeleteElection(session.id, deleteTarget.id);
+              setDeleteTarget(null);
+            }}
+            title={deleteTarget.type === 'member' ? 'Eliminar elector' : 'Eliminar elección'}
+            message={`¿Eliminar ${deleteTarget.type === 'member' ? 'al elector' : 'la elección'} "${deleteTarget.name}"? Esta acción no se puede deshacer.`}
+          />
+        )}
         <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md">
             <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton>
             <h2 className="text-2xl font-bold text-cyan-700 mb-4">{session.name}</h2>
             <div className="border-b border-slate-200 mb-4 flex gap-2"> <TabButton tabName="acreditacion" label="Acreditación" /> <TabButton tabName="elecciones" label="Elecciones" /> </div>
-            {activeTab === 'acreditacion' && ( <div> <input type="text" placeholder="Buscar miembro..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-4"/> <div className="space-y-2 max-h-64 overflow-y-auto pr-2 mb-4"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between"> <div><p className="font-semibold">{member.name}</p><p className={`text-sm ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Acreditar</button> : <div className="flex items-center gap-2"><span className="font-mono bg-slate-200 px-2 py-1 rounded text-sm">{member.key}</span><button onClick={() => session.id && member.id && onToggleEligibility(session.id, member.id)} className={`text-sm p-1 rounded-full ${member.isEligible ? 'text-green-600' : 'text-red-600'}`}>{member.isEligible ? <CheckCircleIcon/> : <XCircleIcon/>}</button></div>} </div> ))} </div> <div className="border-t border-slate-200 pt-4"> <h4 className="font-semibold text-slate-700 mb-2">Añadir nuevos miembros</h4> <form onSubmit={handleAddMembers} className="space-y-2"> <textarea value={newMembersList} onChange={e => setNewMembersList(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" placeholder="Nombre, email@opcional.com - Solo una persona por línea"></textarea> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg">Añadir</button> </form> </div> <button onClick={downloadMemberList} disabled={!isXlsxLoaded} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg shadow disabled:opacity-50"><DownloadIcon /> Descargar lista</button> </div> )}
-            {activeTab === 'elecciones' && ( <div> <div className="space-y-3"> {Object.values(session.elections).map(election => {
+            {activeTab === 'acreditacion' && ( <div> <input type="text" placeholder="Buscar miembro..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-4"/> <div className="space-y-2 max-h-64 overflow-y-auto pr-2 mb-4"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between relative"> {user?.role === 'superadmin' && onDeleteMember && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'member', id: member.id!, name: member.name }); }} className="absolute top-1 right-1 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar elector"><XIcon /></button>} <div><p className="font-semibold">{member.name}</p><p className={`text-sm ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Acreditar</button> : <div className="flex items-center gap-2"><span className="font-mono bg-slate-200 px-2 py-1 rounded text-sm">{member.key}</span><button onClick={() => session.id && member.id && onToggleEligibility(session.id, member.id)} className={`text-sm p-1 rounded-full ${member.isEligible ? 'text-green-600' : 'text-red-600'}`}>{member.isEligible ? <CheckCircleIcon/> : <XCircleIcon/>}</button></div>} </div> ))} </div> <div className="border-t border-slate-200 pt-4"> <h4 className="font-semibold text-slate-700 mb-2">Añadir nuevos miembros</h4> <form onSubmit={handleAddMembers} className="space-y-2"> <textarea value={newMembersList} onChange={e => setNewMembersList(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" placeholder="Nombre, email@opcional.com - Solo una persona por línea"></textarea> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg">Añadir</button> </form> </div> <button onClick={downloadMemberList} disabled={!isXlsxLoaded} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg shadow disabled:opacity-50"><DownloadIcon /> Descargar lista</button> </div> )}
+            {activeTab === 'elecciones' && ( <div> <div className="space-y-3"> {electionsList.map(election => {
                 const totalPapeletas = session.members.filter(m => m.status === 'Presente').length;
                 const votesCount = Object.values(votes).map(v => election.id ? v[election.id] : undefined).filter(Boolean).length;
                 const progress = totalPapeletas > 0 ? (votesCount / totalPapeletas) * 100 : 0;
+                const isDragging = draggedElectionId === election.id;
                 return (
-                <div key={election.id} className="bg-slate-100 p-3 rounded-lg"> <p className="font-bold">{election.name}</p>
+                <div key={election.id} draggable={!!onReorderElections} onDragStart={() => onReorderElections && election.id && handleDragStart(election.id)} onDragOver={handleDragOver} onDrop={(e) => election.id && handleDrop(e, election.id)} onDragEnd={handleDragEnd} className={`bg-slate-100 p-3 rounded-lg relative ${onReorderElections ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-50' : ''}`}> {user?.role === 'superadmin' && onDeleteElection && election.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'election', id: election.id!, name: election.name }); }} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar elección"><XIcon /></button>} <p className="font-bold">{election.name}</p>
                  {election.status === 'Abierta' && <div className="mt-2"> <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesCount} / {totalPapeletas}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: `${progress}%` }}></div></div> </div>}
                  <div className="flex justify-between items-center mt-2"> <span className={`text-xs font-semibold px-2 py-1 rounded-full ${ election.status === 'Abierta' ? 'bg-green-100 text-green-800' : election.status === 'Cerrada' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' }`}>{election.status}</span> <div className="flex gap-2"> {election.status === 'Prevista' && <button onClick={() => session.id && election.id && onChangeElectionStatus(session.id, election.id, 'Abierta')} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Abrir</button>} {election.status === 'Abierta' && <button onClick={() => openProgressModal(election)} className="bg-slate-500 hover:bg-slate-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Gestionar</button>} {election.status === 'Abierta' && <button onClick={() => openCloseModal(election)} className="bg-red-500 hover:bg-red-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Cerrar</button>} {election.status === 'Cerrada' && election.id && <button onClick={() => onViewResults(election.id!)} className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Resultados</button>} </div> </div> </div>
             )})} </div> <button onClick={() => setShowCreateElection(true)} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 rounded-lg"><PlusIcon /> Añadir elección</button> <Modal isOpen={showCreateElection} onClose={() => setShowCreateElection(false)} title="Crear nueva elección"> <form onSubmit={handleCreateElection} className="space-y-4"> <input type="text" placeholder="Nombre de la elección" value={newElection.name} onChange={e => setNewElection({...newElection, name: e.target.value})} className="w-full bg-slate-50 border p-2 rounded-lg" required/> <textarea placeholder="Descripción / Instrucciones" value={newElection.description} onChange={e => setNewElection({...newElection, description: e.target.value})} className="w-full bg-slate-50 border p-2 rounded-lg" rows={3}></textarea> <input type="number" placeholder="Puestos a elegir" value={newElection.positionsToElect} onChange={e => setNewElection({...newElection, positionsToElect: parseInt(e.target.value)})} className="w-full bg-slate-50 border p-2 rounded-lg" min="1" required/> <div className="flex justify-end gap-3"><button type="button" onClick={() => setShowCreateElection(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg">Cancelar</button><button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Crear</button></div> </form> </Modal> </div> )}
@@ -1041,25 +1193,24 @@ function VoteSuccessPage({ onBackToSession, onExit }: VoteSuccessPageProps) {
   ); 
 }
 
-function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElection }: ResultsPageProps) {
-    // Usar suscripción en tiempo real para los votos de esta elección
+function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElection, onViewTiebreaker, voterView }: ResultsPageProps) {
+    // Miembros en tiempo real para recuento correcto entre ventanas
+    const { members: realtimeMembers } = useRealtimeSession(session.id || null);
     const { votes: realtimeVotes, loading: votesLoading } = useRealtimeVotes(session.id || null, election.id || null);
-    
-    // Usar votos en tiempo real si están disponibles
-    const votes = useMemo(() => {
-        // Convertir votos en tiempo real al formato esperado
-        if (Object.keys(realtimeVotes).length > 0) {
-            return realtimeVotes;
-        }
-        return initialVotes;
-    }, [realtimeVotes, initialVotes]);
 
-    const electionVoterKeys = new Set(session.members.map((v: Member) => v.key));
+    const sessionMembers = realtimeMembers.length > 0 ? realtimeMembers : session.members;
+    // Usar solo votos en tiempo real de esta elección para no mezclar con otras
+    const votes = useMemo(() => {
+        if (session.id && election.id) return realtimeVotes;
+        return initialVotes;
+    }, [session.id, election.id, realtimeVotes, initialVotes]);
+
+    const electionVoterKeys = new Set(sessionMembers.map((v: Member) => v.key));
     const electionVotes = Object.entries(votes).filter(([key]) => electionVoterKeys.has(key)).map(([, userVotes]: [string, { [electionId: string]: string[] }]) => election.id ? userVotes[election.id] : undefined).filter(Boolean);
     const papeletasEmitidas = electionVotes.length;
-    const totalPapeletas = session.members.filter((m: Member) => m.status === 'Presente').length;
-    
-    const candidatesForResults = election.candidates || session.members.filter((m: Member) => m.status === 'Presente').map((m: Member) => m.name);
+    const totalPapeletas = sessionMembers.filter((m: Member) => m.status === 'Presente').length;
+
+    const candidatesForResults = election.candidates || sessionMembers.filter((m: Member) => m.status === 'Presente').map((m: Member) => m.name);
     const results: { [name: string]: number } = {};
     candidatesForResults.forEach((name: string) => { results[name] = 0; });
     
@@ -1071,23 +1222,51 @@ function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElec
 
     const winners = sortedResults.filter(([,count]) => (count as number) === maxVotes && maxVotes > 0);
     const tiedCandidates = winners.length > election.positionsToElect ? winners.map(([name]) => name) : [];
+    const tiebreakerElection = session.elections ? Object.values(session.elections).find((e: Election) => e.name === `Desempate: ${election.name}`) : undefined;
 
     const createTiebreaker = () => {
+        if (!onAddElection) return;
         const tiebreakerElection = { name: `Desempate: ${election.name}`, description: `Votación de desempate. Candidatos: ${tiedCandidates.join(', ')}.`, positionsToElect: election.positionsToElect, status: 'Prevista' as const, candidates: tiedCandidates, sessionId: session.id! };
         if (session.id) onAddElection(session.id, tiebreakerElection);
         onBack();
     };
 
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a gestión</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> {votesLoading && <div className="text-center py-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500 mx-auto mb-2"></div><p className="text-sm text-slate-500">Actualizando resultados...</p></div>} <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && <div className="my-4"><button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button></div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
+    if (voterView) {
+        return (
+            <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md">
+                <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a la sesión</NavigationButton>
+                <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2>
+                {votesLoading && <div className="text-center py-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500 mx-auto mb-2"></div><p className="text-sm text-slate-500">Actualizando resultados...</p></div>}
+                <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4">
+                    <div className="flex-1">
+                        <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div>
+                        <div className="text-sm text-slate-500">Papeletas emitidas</div>
+                    </div>
+                </div>
+                <div className="mt-4 space-y-2">
+                    {tiedCandidates.length > 0 ? (
+                        <p className="text-slate-800 font-semibold">Empate entre {tiedCandidates.join(', ')} con {getVoteText(maxVotes)}.</p>
+                    ) : winners.length > 0 ? (
+                        <p className="text-slate-800"><span className="font-semibold">Elegido(s):</span> {winners.map(([name]) => name).join(', ')} con {getVoteText(maxVotes)}.</p>
+                    ) : (
+                        <p className="text-slate-500">Sin votos emitidos.</p>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a gestión</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> {votesLoading && <div className="text-center py-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500 mx-auto mb-2"></div><p className="text-sm text-slate-500">Actualizando resultados...</p></div>} <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && onAddElection && <div className="my-4">{tiebreakerElection && onViewTiebreaker ? <button onClick={() => onViewTiebreaker(tiebreakerElection.id!)} className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 rounded-lg">Ver votación de desempate</button> : <button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button>}</div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
 }
 
 function SuperAdminPanel({ admins, onAddAdmin, onDeleteAdmin, onBack }: SuperAdminPanelProps) {
     const [username, setUsername] = useState<string>('');
     const [password, setPassword] = useState<string>('');
     const [name, setName] = useState<string>('');
+    const [deleteTarget, setDeleteTarget] = useState<{ adminId: string; adminName: string } | null>(null);
     const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (!username || !password || !name) { alert('Por favor, completa todos los campos.'); return; } onAddAdmin(username, password, name); setUsername(''); setPassword(''); setName(''); };
     const managerAdmins = Object.entries(admins).filter(([, details]: [string, Admin]) => details.role === 'manager');
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-4">Gestionar administradores</h2> <div className="mb-6 border-t border-slate-200 pt-4"> <h3 className="text-lg font-semibold text-slate-700 mb-2">Crear nuevo administrador</h3> <form onSubmit={handleSubmit} className="space-y-3"> <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre completo" /> <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre de usuario" /> <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Contraseña" /> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg shadow">Crear administrador</button> </form> </div> <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Lista de administradores</h3> <div className="space-y-2 max-h-60 overflow-y-auto pr-2"> {managerAdmins.map(([adminId, details]) => ( <div key={adminId} className="bg-slate-100 p-3 rounded-lg flex justify-between items-center"> <div> <p className="font-semibold text-slate-800">{details.name}</p> <p className="text-sm text-slate-500">Usuario: {details.username}</p> </div> <button onClick={() => onDeleteAdmin(adminId, details.name)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded-lg text-sm flex items-center gap-1 transition-colors"> <XIcon /> Eliminar </button> </div> ))} </div> </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-4">Gestionar administradores</h2> <div className="mb-6 border-t border-slate-200 pt-4"> <h3 className="text-lg font-semibold text-slate-700 mb-2">Crear nuevo administrador</h3> <form onSubmit={handleSubmit} className="space-y-3"> <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre completo" /> <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre de usuario" /> <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Contraseña" /> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg shadow">Crear administrador</button> </form> </div> <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Lista de administradores</h3> <div className="space-y-2 max-h-60 overflow-y-auto pr-2"> {managerAdmins.map(([adminId, details]) => ( <div key={adminId} className="bg-slate-100 p-3 rounded-lg flex justify-between items-center relative"> <button type="button" onClick={() => setDeleteTarget({ adminId, adminName: details.name })} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar administrador"><XIcon /></button> <div> <p className="font-semibold text-slate-800">{details.name}</p> <p className="text-sm text-slate-500">Usuario: {details.username}</p> </div> </div> ))} </div> {deleteTarget && <ConfirmDeleteModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={() => { onDeleteAdmin(deleteTarget.adminId, deleteTarget.adminName); setDeleteTarget(null); }} title="Eliminar administrador" message={`¿Eliminar a ${deleteTarget.adminName}? Esta acción no se puede deshacer.`} />} </div> );
 }
 
 

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { VoterSessionViewProps } from '../types';
 import { useRealtimeSession, useRealtimeVotes } from '../hooks/useRealtimeData';
+import { getElectionsOrdered } from '../utils';
 import type { Session, Election } from '../types';
 
 // Iconos simples
@@ -41,7 +42,8 @@ export const VoterSessionView: React.FC<VoterSessionViewProps> = ({
   session: initialSession,
   votes: initialVotes,
   onVoteClick,
-  onExit
+  onExit,
+  onViewResults
 }) => {
   // Asegurar que tenemos el sessionId correcto
   const sessionId = initialSession?.id || null;
@@ -72,14 +74,8 @@ export const VoterSessionView: React.FC<VoterSessionViewProps> = ({
   // Una vez que la suscripción está activa, usar siempre las elecciones en tiempo real
   const elections = useMemo(() => {
     if (!session) return [];
-    
-    // Si la suscripción está activa (no está cargando), usar las elecciones en tiempo real
-    if (!sessionLoading && realtimeSession) {
-      return Object.values(realtimeElections);
-    }
-    
-    // Mientras carga, usar las elecciones de la sesión
-    return Object.values(session.elections || {});
+    const source = !sessionLoading && realtimeSession ? realtimeElections : (session.elections || {});
+    return getElectionsOrdered(source, session.electionOrder);
   }, [session, realtimeElections, sessionLoading, realtimeSession]);
 
   // Los votos del votante ya vienen filtrados en initialVotes
@@ -149,6 +145,14 @@ export const VoterSessionView: React.FC<VoterSessionViewProps> = ({
                         className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-1 px-3 rounded-lg text-sm"
                       >
                         {hasVoted ? 'Modificar' : 'Votar'}
+                      </button>
+                    )}
+                    {election.status === 'Cerrada' && election.id && onViewResults && (
+                      <button 
+                        onClick={() => onViewResults(election.id!)} 
+                        className="bg-slate-500 hover:bg-slate-600 text-white font-bold py-1 px-3 rounded-lg text-sm"
+                      >
+                        Ver resultados
                       </button>
                     )}
                   </div>
