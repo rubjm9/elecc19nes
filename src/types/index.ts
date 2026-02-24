@@ -71,7 +71,7 @@ export interface SessionManagementProps {
 
 export interface VoterSessionViewProps {
   session: Session;
-  votes: Database['votes'];
+  votes: { [electionId: string]: string[] };
   onVoteClick: (electionId: string) => void;
   onExit: () => void;
 }

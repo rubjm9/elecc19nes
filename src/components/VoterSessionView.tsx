@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import type { VoterSessionViewProps } from '../types';
-import { ELECTION_STATUSES } from '../constants';
 import { useRealtimeSession, useRealtimeVotes } from '../hooks/useRealtimeData';
 import type { Session, Election } from '../types';
 
@@ -49,7 +48,7 @@ export const VoterSessionView: React.FC<VoterSessionViewProps> = ({
   
   // Usar useRealtimeSession para obtener la sesión completa en tiempo real (incluye miembros y elecciones)
   const { session: realtimeSession, members, elections: realtimeElections, loading: sessionLoading } = useRealtimeSession(sessionId);
-  const { votes: allRealtimeVotes } = useRealtimeVotes(sessionId);
+  const { votes: _allRealtimeVotes } = useRealtimeVotes(sessionId);
 
   // Combinar sesión en tiempo real con la inicial
   const session: Session = useMemo(() => {

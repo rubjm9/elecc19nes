@@ -4,7 +4,7 @@ import type { SessionManagementProps } from '../types';
 import { ELECTION_STATUSES, MEMBER_STATUSES } from '../constants';
 import { getStatusColor, calculateVoteProgress, getVoteText } from '../utils';
 import { useRealtimeSession, useRealtimeVotes } from '../hooks/useRealtimeData';
-import type { Session } from '../types';
+import type { Session, Election } from '../types';
 
 export const SessionManagement: React.FC<SessionManagementProps> = ({
   session: initialSession,
@@ -18,8 +18,8 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
   onViewResults
 }) => {
   // Usar suscripciones en tiempo real
-  const { session: realtimeSession, members, elections, loading: sessionLoading } = useRealtimeSession(initialSession?.id || null);
-  const { votes: realtimeVotes, loading: votesLoading } = useRealtimeVotes(initialSession?.id || null);
+  const { session: realtimeSession, members, elections: electionsMap, loading: sessionLoading } = useRealtimeSession(initialSession?.id || null);
+  const { votes: realtimeVotes, loading: _votesLoading } = useRealtimeVotes(initialSession?.id || null);
 
   // Combinar datos de tiempo real con la sesión inicial
   const session: Session = useMemo(() => {
@@ -29,9 +29,9 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
     return {
       ...baseSession,
       members: members.length > 0 ? members : (initialSession?.members || []),
-      elections: Object.keys(elections).length > 0 ? elections : (initialSession?.elections || {})
+      elections: Object.keys(electionsMap).length > 0 ? electionsMap : (initialSession?.elections || {})
     };
-  }, [realtimeSession, initialSession, members, elections]);
+  }, [realtimeSession, initialSession, members, electionsMap]);
 
   // Usar votos en tiempo real si están disponibles
   const votes = useMemo(() => {
@@ -94,7 +94,7 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
     setCandidates(newCandidates);
   };
 
-  const elections = Object.values(session?.elections || {});
+  const electionsList = Object.values(session?.elections || {});
   const accreditedMembers = (session?.members || []).filter(m => m.status === MEMBER_STATUSES.PRESENTE);
 
   if (!session) {
@@ -216,20 +216,20 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
           {/* Elections Section */}
           <div className="bg-white rounded-2xl shadow-xl p-6">
             <h2 className="text-2xl font-bold text-slate-800 mb-4">
-              Elecciones ({elections.length})
+              Elecciones ({electionsList.length})
             </h2>
             
             <div className="space-y-3 max-h-96 overflow-y-auto">
-              {(sessionLoading && elections.length === 0) ? (
+              {(sessionLoading && electionsList.length === 0) ? (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500 mx-auto mb-2"></div>
                   <p className="text-slate-500 text-sm">Cargando elecciones...</p>
                 </div>
               ) : (
-                elections.map((election) => {
+                electionsList.map((election: Election) => {
                   // Contar votos de esta elección
                   const voteCount = Object.values(votes).reduce((count, voterVotes) => {
-                    return count + (voterVotes[election.id!] ? 1 : 0);
+                    return count + (election.id && voterVotes[election.id] ? 1 : 0);
                   }, 0);
                   const progress = calculateVoteProgress(voteCount, accreditedMembers.length);
                 
@@ -250,7 +250,7 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
                       <div className="flex gap-2">
                         <Select
                           value={election.status}
-                          onChange={(status) => onChangeElectionStatus(session.id!, election.id!, status as any)}
+                          onChange={(status) => onChangeElectionStatus(session.id!, election.id!, status as Election['status'])}
                           options={Object.entries(ELECTION_STATUSES).map(([, value]) => ({
                             value,
                             label: value

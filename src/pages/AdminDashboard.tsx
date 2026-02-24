@@ -3,7 +3,7 @@ import { Button, Modal, Input, Textarea } from '../components/ui';
 import type { AdminDashboardProps } from '../types';
 import { useRealtimeSessions } from '../hooks/useRealtimeData';
 import { FirestoreService } from '../firebase/firestoreService';
-import type { FirestoreSession, FirestoreMember, FirestoreElection } from '../firebase/firestoreService';
+import type { FirestoreSession } from '../firebase/firestoreService';
 import type { Session } from '../types';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ 

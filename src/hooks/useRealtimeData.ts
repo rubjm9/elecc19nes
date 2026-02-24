@@ -1,11 +1,10 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { FirestoreService } from '../firebase/firestoreService';
 import type { 
   FirestoreSession, 
   FirestoreMember, 
   FirestoreElection, 
-  FirestoreAdmin,
-  FirestoreVote 
+  FirestoreAdmin
 } from '../firebase/firestoreService';
 import type { Unsubscribe } from 'firebase/firestore';
 

@@ -86,13 +86,6 @@ interface SessionManagementProps {
   isXlsxLoaded: boolean;
 }
 
-interface VoterSessionViewProps {
-  session: Session;
-  votes: { [electionId: string]: string[] };
-  onVoteClick: (electionId: string) => void;
-  onExit: () => void;
-}
-
 interface BallotPageProps {
   session: Session;
   election: Election;
@@ -441,24 +434,30 @@ export default function App() {
           isEligible: true,
           sessionId
         };
-      }).filter(Boolean);
+      });
+      const memberDataFiltered = memberData.filter((m) => m !== null) as Omit<FirestoreMember, 'id' | 'createdAt'>[];
 
       if (duplicates.length > 0) { 
         alert(`Los siguientes miembros ya existen: ${duplicates.join(', ')}`); 
       }
       
-      if (memberData.length === 0) {
+      if (memberDataFiltered.length === 0) {
         setLoading(false);
         return;
       }
 
       // Guardar miembros en Firestore
-      const memberIds = await FirestoreService.createMembers(memberData);
+      const memberIds = await FirestoreService.createMembers(memberDataFiltered);
 
       // Actualizar estado local con los IDs reales de Firestore
-      const newMembers: Member[] = memberData.map((member, index) => ({
+      const newMembers: Member[] = memberDataFiltered.map((member, index) => ({
         id: memberIds[index],
-        ...member
+        name: member.name,
+        email: member.email,
+        key: member.key,
+        status: member.status,
+        isEligible: member.isEligible,
+        sessionId: member.sessionId
       }));
 
       setDb((prev: Database) => { 
@@ -925,8 +924,8 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
 
 function SessionManagement({ session: initialSession, votes: initialVotes, onAccredit, onToggleEligibility, onChangeElectionStatus, onAddElection, onAddMembers, onBack, onViewResults, isXlsxLoaded }: SessionManagementProps) {
     // Usar suscripciones en tiempo real
-    const { session: realtimeSession, members, elections, loading: sessionLoading } = useRealtimeSession(initialSession?.id || null);
-    const { votes: realtimeVotes, loading: votesLoading } = useRealtimeVotes(initialSession?.id || null);
+    const { session: realtimeSession, members, elections, loading: _sessionLoading } = useRealtimeSession(initialSession?.id || null);
+    const { votes: realtimeVotes, loading: _votesLoading } = useRealtimeVotes(initialSession?.id || null);
 
     // Combinar datos de tiempo real con la sesión inicial
     const session: Session = useMemo(() => {
