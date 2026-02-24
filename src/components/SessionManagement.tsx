@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button, Modal, Input, Textarea, Select } from '../components/ui';
 import type { SessionManagementProps } from '../types';
 import { ELECTION_STATUSES, MEMBER_STATUSES } from '../constants';
 import { getStatusColor, calculateVoteProgress, getVoteText } from '../utils';
+import { useRealtimeSession, useRealtimeVotes } from '../hooks/useRealtimeData';
+import type { Session } from '../types';
 
 export const SessionManagement: React.FC<SessionManagementProps> = ({
-  session,
-  votes,
+  session: initialSession,
+  votes: initialVotes,
   onAccredit,
   onToggleEligibility,
   onChangeElectionStatus,
@@ -15,6 +17,26 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
   onBack,
   onViewResults
 }) => {
+  // Usar suscripciones en tiempo real
+  const { session: realtimeSession, members, elections, loading: sessionLoading } = useRealtimeSession(initialSession?.id || null);
+  const { votes: realtimeVotes, loading: votesLoading } = useRealtimeVotes(initialSession?.id || null);
+
+  // Combinar datos de tiempo real con la sesión inicial
+  const session: Session = useMemo(() => {
+    if (!realtimeSession && !initialSession) return null as any;
+    
+    const baseSession = realtimeSession || initialSession;
+    return {
+      ...baseSession,
+      members: members.length > 0 ? members : (initialSession?.members || []),
+      elections: Object.keys(elections).length > 0 ? elections : (initialSession?.elections || {})
+    };
+  }, [realtimeSession, initialSession, members, elections]);
+
+  // Usar votos en tiempo real si están disponibles
+  const votes = useMemo(() => {
+    return Object.keys(realtimeVotes).length > 0 ? realtimeVotes : initialVotes;
+  }, [realtimeVotes, initialVotes]);
   const [showAddElection, setShowAddElection] = useState(false);
   const [showAddMembers, setShowAddMembers] = useState(false);
   const [electionName, setElectionName] = useState('');
@@ -72,8 +94,19 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
     setCandidates(newCandidates);
   };
 
-  const elections = Object.values(session.elections);
-  const accreditedMembers = session.members.filter(m => m.status === MEMBER_STATUSES.PRESENTE);
+  const elections = Object.values(session?.elections || {});
+  const accreditedMembers = (session?.members || []).filter(m => m.status === MEMBER_STATUSES.PRESENTE);
+
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-100 p-6 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+          <p className="text-slate-500 text-lg">Cargando sesión...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-100 p-6">
@@ -119,7 +152,13 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
             </h2>
             
             <div className="space-y-3 max-h-96 overflow-y-auto">
-              {session.members.map((member) => (
+              {(sessionLoading && session.members.length === 0) ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500 mx-auto mb-2"></div>
+                  <p className="text-slate-500 text-sm">Cargando miembros...</p>
+                </div>
+              ) : (
+                [...session.members].sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })).map((member) => (
                 <div
                   key={member.id}
                   className="flex justify-between items-center p-3 border border-slate-200 rounded-lg"
@@ -169,7 +208,8 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
                     </Button>
                   </div>
                 </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
@@ -180,10 +220,18 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
             </h2>
             
             <div className="space-y-3 max-h-96 overflow-y-auto">
-              {elections.map((election) => {
-                const electionVotes = votes[session.id!]?.[election.id!] || [];
-                const voteCount = electionVotes.length;
-                const progress = calculateVoteProgress(voteCount, accreditedMembers.length);
+              {(sessionLoading && elections.length === 0) ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500 mx-auto mb-2"></div>
+                  <p className="text-slate-500 text-sm">Cargando elecciones...</p>
+                </div>
+              ) : (
+                elections.map((election) => {
+                  // Contar votos de esta elección
+                  const voteCount = Object.values(votes).reduce((count, voterVotes) => {
+                    return count + (voterVotes[election.id!] ? 1 : 0);
+                  }, 0);
+                  const progress = calculateVoteProgress(voteCount, accreditedMembers.length);
                 
                 return (
                   <div
@@ -236,7 +284,8 @@ export const SessionManagement: React.FC<SessionManagementProps> = ({
                     </div>
                   </div>
                 );
-              })}
+              })
+              )}
             </div>
           </div>
         </div>

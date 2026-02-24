@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Button, Modal, Input } from '../components/ui';
 import type { SuperAdminPanelProps } from '../types';
+import { useRealtimeAdmins } from '../hooks/useRealtimeData';
 
 // Icono X para el botón de eliminar
 const XIcon = () => (
@@ -10,7 +11,7 @@ const XIcon = () => (
 );
 
 export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({ 
-  admins, 
+  admins: initialAdmins, 
   onAddAdmin, 
   onDeleteAdmin, 
   onBack 
@@ -19,6 +20,14 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  
+  // Usar suscripción en tiempo real
+  const { admins: realtimeAdmins, loading: adminsLoading } = useRealtimeAdmins();
+  
+  // Usar admins en tiempo real si están disponibles, sino usar los iniciales
+  const admins = useMemo(() => {
+    return Object.keys(realtimeAdmins).length > 0 ? realtimeAdmins : initialAdmins;
+  }, [realtimeAdmins, initialAdmins]);
 
   const handleAddAdmin = () => {
     if (username.trim() && password.trim() && name.trim()) {
@@ -74,7 +83,12 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             Administradores ({adminsList.length})
           </h2>
           
-          {adminsList.length === 0 ? (
+          {adminsLoading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+              <p className="text-slate-500 text-lg">Cargando administradores...</p>
+            </div>
+          ) : adminsList.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-slate-500 text-lg">
                 No hay administradores registrados.

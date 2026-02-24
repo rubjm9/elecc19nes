@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { FirestoreService } from './firebase/firestoreService';
+import { useRealtimeVotes, useRealtimeSession } from './hooks/useRealtimeData';
+import { VoterSessionView } from './components/VoterSessionView';
 import type { 
   FirestoreAdmin, 
   FirestoreMember, 
@@ -251,10 +253,63 @@ export default function App() {
         
         // Cargar votos del votante
         const voterVotes = await FirestoreService.getVotesByVoter(key);
-        setDb(prev => ({
-          ...prev,
-          votes: { ...prev.votes, [key]: voterVotes }
-        }));
+        
+        // Asegurar que la sesión tenga los datos completos (miembros y elecciones)
+        if (memberData.sessionId && !db.sessions[memberData.sessionId]) {
+          // Si la sesión no está en db, cargarla
+          const [sessionData, members, elections] = await Promise.all([
+            FirestoreService.getSessions().then(sessions => sessions[memberData.sessionId]),
+            FirestoreService.getMembersBySession(memberData.sessionId),
+            FirestoreService.getElectionsBySession(memberData.sessionId)
+          ]);
+          
+          if (sessionData) {
+            setDb(prev => ({
+              ...prev,
+              sessions: {
+                ...prev.sessions,
+                [memberData.sessionId]: {
+                  ...sessionData,
+                  members,
+                  elections
+                }
+              },
+              votes: { ...prev.votes, [key]: voterVotes }
+            }));
+          } else {
+            setDb(prev => ({
+              ...prev,
+              votes: { ...prev.votes, [key]: voterVotes }
+            }));
+          }
+        } else if (memberData.sessionId && db.sessions[memberData.sessionId]) {
+          // Si la sesión existe pero puede no tener elecciones, asegurarse de cargarlas
+          const session = db.sessions[memberData.sessionId];
+          if (!session.elections || Object.keys(session.elections).length === 0) {
+            const elections = await FirestoreService.getElectionsBySession(memberData.sessionId);
+            setDb(prev => ({
+              ...prev,
+              sessions: {
+                ...prev.sessions,
+                [memberData.sessionId]: {
+                  ...session,
+                  elections
+                }
+              },
+              votes: { ...prev.votes, [key]: voterVotes }
+            }));
+          } else {
+            setDb(prev => ({
+              ...prev,
+              votes: { ...prev.votes, [key]: voterVotes }
+            }));
+          }
+        } else {
+          setDb(prev => ({
+            ...prev,
+            votes: { ...prev.votes, [key]: voterVotes }
+          }));
+        }
         
         setPage('voterSession'); 
         setError(''); 
@@ -339,9 +394,23 @@ export default function App() {
 
       await FirestoreService.createMembers(membersWithSession);
 
-      // Recargar datos
-      await loadInitialData();
-      
+      // Actualización optimista: agregar la sesión al estado local inmediatamente
+      // Las suscripciones en tiempo real la mantendrán actualizada después
+      setDb((prev: Database) => {
+        const newDb = JSON.parse(JSON.stringify(prev));
+        newDb.sessions[sessionId] = {
+          id: sessionId,
+          name: sessionName,
+          createdBy: user!.username,
+          members: membersWithSession.map((m, index) => ({
+            id: `mem${Date.now()}${index}`,
+            ...m
+          })),
+          elections: {}
+        };
+        return newDb;
+      });
+
       setError('');
     } catch (error) {
       console.error('Error creating session:', error);
@@ -350,26 +419,61 @@ export default function App() {
       setLoading(false);
     }
   };
-  const addMembersToSession = (sessionId: string, membersList: string) => {
-    const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
-    const existingNames = new Set(db.sessions[sessionId].members.map((m: Member) => m.name.toLowerCase()));
-    let duplicates: string[] = [];
-    const newMembers = membersList.split('\n').filter((line: string) => line.trim() !== '').map((line: string, index: number) => {
+  const addMembersToSession = async (sessionId: string, membersList: string) => {
+    try {
+      setLoading(true);
+      const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
+      const existingNames = new Set(db.sessions[sessionId].members.map((m: Member) => m.name.toLowerCase()));
+      let duplicates: string[] = [];
+      
+      const memberData = membersList.split('\n').filter((line: string) => line.trim() !== '').map((line: string) => {
         const parts = line.split(',').map((p: string) => p.trim());
         const name = parts[0];
-        if (existingNames.has(name.toLowerCase())) { duplicates.push(name); return null; }
+        if (existingNames.has(name.toLowerCase())) { 
+          duplicates.push(name); 
+          return null; 
+        }
         return { 
-          id: `mem${Date.now()}${index}`, 
           name, 
           email: parts.length > 1 ? parts[1] : null, 
           key: generateKey(), 
           status: 'Invitado' as const, 
-          isEligible: true 
+          isEligible: true,
+          sessionId
         };
-    }).filter(Boolean) as Member[];
-    if (duplicates.length > 0) { alert(`Los siguientes miembros ya existen: ${duplicates.join(', ')}`); }
-    if (newMembers.length === 0) return;
-    setDb((prev: Database) => { const newDb = JSON.parse(JSON.stringify(prev)); newDb.sessions[sessionId].members.push(...newMembers); return newDb; });
+      }).filter(Boolean);
+
+      if (duplicates.length > 0) { 
+        alert(`Los siguientes miembros ya existen: ${duplicates.join(', ')}`); 
+      }
+      
+      if (memberData.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      // Guardar miembros en Firestore
+      const memberIds = await FirestoreService.createMembers(memberData);
+
+      // Actualizar estado local con los IDs reales de Firestore
+      const newMembers: Member[] = memberData.map((member, index) => ({
+        id: memberIds[index],
+        ...member
+      }));
+
+      setDb((prev: Database) => { 
+        const newDb = JSON.parse(JSON.stringify(prev)); 
+        newDb.sessions[sessionId].members.push(...newMembers); 
+        return newDb; 
+      });
+
+      setError('');
+    } catch (error) {
+      console.error('Error adding members:', error);
+      setError('Error al agregar miembros');
+    } finally {
+      setLoading(false);
+    }
   };
   const accreditMember = async (sessionId: string, memberId: string) => { 
     try {
@@ -618,7 +722,9 @@ export default function App() {
         return <SessionManagement session={db.sessions[currentSessionId]} votes={db.votes} onAccredit={accreditMember} onToggleEligibility={toggleMemberEligibility} onChangeElectionStatus={changeElectionStatus} onAddElection={addElectionToSession} onAddMembers={addMembersToSession} onBack={() => setPage('adminDashboard')} onViewResults={(elecId: string) => { setCurrentElectionId(elecId); setPage('results'); }} isXlsxLoaded={isXlsxLoaded}/>;
       case 'voterSession': 
         if (!currentSessionId || !voterKey || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
-        return <VoterSessionView session={db.sessions[currentSessionId]} votes={db.votes[voterKey] || {}} onVoteClick={(elecId: string) => { setCurrentElectionId(elecId); setPage('ballot'); }} onExit={() => { setVoterKey(null); setCurrentSessionId(null); setPage('home'); }} />;
+        // Asegurar que la sesión tenga el id correcto
+        const sessionForVoter = { ...db.sessions[currentSessionId], id: currentSessionId };
+        return <VoterSessionView session={sessionForVoter} votes={db.votes[voterKey] || {}} onVoteClick={(elecId: string) => { setCurrentElectionId(elecId); setPage('ballot'); }} onExit={() => { setVoterKey(null); setCurrentSessionId(null); setPage('home'); }} />;
       case 'ballot':
         if (!currentSessionId || !currentElectionId || !voterKey || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
         const sessionForBallot = db.sessions[currentSessionId];
@@ -817,7 +923,28 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
     </> );
 }
 
-function SessionManagement({ session, votes, onAccredit, onToggleEligibility, onChangeElectionStatus, onAddElection, onAddMembers, onBack, onViewResults, isXlsxLoaded }: SessionManagementProps) {
+function SessionManagement({ session: initialSession, votes: initialVotes, onAccredit, onToggleEligibility, onChangeElectionStatus, onAddElection, onAddMembers, onBack, onViewResults, isXlsxLoaded }: SessionManagementProps) {
+    // Usar suscripciones en tiempo real
+    const { session: realtimeSession, members, elections, loading: sessionLoading } = useRealtimeSession(initialSession?.id || null);
+    const { votes: realtimeVotes, loading: votesLoading } = useRealtimeVotes(initialSession?.id || null);
+
+    // Combinar datos de tiempo real con la sesión inicial
+    const session: Session = useMemo(() => {
+        if (!realtimeSession && !initialSession) return null as any;
+        
+        const baseSession = realtimeSession || initialSession;
+        return {
+            ...baseSession,
+            members: members.length > 0 ? members : (initialSession?.members || []),
+            elections: Object.keys(elections).length > 0 ? elections : (initialSession?.elections || {})
+        };
+    }, [realtimeSession, initialSession, members, elections]);
+
+    // Usar votos en tiempo real si están disponibles
+    const votes = useMemo(() => {
+        return Object.keys(realtimeVotes).length > 0 ? realtimeVotes : initialVotes;
+    }, [realtimeVotes, initialVotes]);
+
     const [activeTab, setActiveTab] = useState<string>('acreditacion');
     const [filter, setFilter] = useState<string>('');
     const [showCreateElection, setShowCreateElection] = useState<boolean>(false);
@@ -827,9 +954,22 @@ function SessionManagement({ session, votes, onAccredit, onToggleEligibility, on
     const [electionToManage, setElectionToManage] = useState<Election | null>(null);
     const [isProgressModalOpen, setProgressModalOpen] = useState<boolean>(false);
 
+    if (!session) {
+        return (
+            <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md">
+                <div className="text-center py-8">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+                    <p className="text-slate-500">Cargando sesión...</p>
+                </div>
+            </div>
+        );
+    }
+
     const handleCreateElection = (e: React.FormEvent) => { e.preventDefault(); if (session.id) { onAddElection(session.id, { ...newElection, status: 'Prevista' as const, sessionId: session.id }); setShowCreateElection(false); setNewElection({ name: '', description: '', positionsToElect: 1 }); } };
     const handleAddMembers = (e: React.FormEvent) => { e.preventDefault(); onAddMembers(session.id!, newMembersList); setNewMembersList(''); };
-    const filteredMembers = session.members.filter((m: Member) => m.name.toLowerCase().includes(filter.toLowerCase()));
+    const filteredMembers = session.members
+        .filter((m: Member) => m.name.toLowerCase().includes(filter.toLowerCase()))
+        .sort((a: Member, b: Member) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
     
     const downloadMemberList = () => { if (!isXlsxLoaded) { alert("La librería de exportación no está lista."); return; } const data = session.members.map(({ name, key, email }) => ({ Nombre: name, Clave: key, Email: email || '' })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Miembros"); XLSX.writeFile(wb, `miembros_${session.name.replace(/ /g, '_')}.xlsx`); };
     const openCloseModal = (election: Election) => { setElectionToManage(election); setCloseModalOpen(true); };
@@ -837,7 +977,9 @@ function SessionManagement({ session, votes, onAccredit, onToggleEligibility, on
 
     const TabButton = ({ tabName, label }: { tabName: string; label: string }) => ( <button onClick={() => setActiveTab(tabName)} className={`py-2 px-4 text-sm font-bold rounded-t-lg ${activeTab === tabName ? 'bg-white border-b-0 border border-slate-200' : 'bg-slate-100 border border-slate-200'}`}> {label} </button> );
 
-    const accreditedVoters = session.members.filter((m: Member) => m.status === 'Presente');
+    const accreditedVoters = session.members
+        .filter((m: Member) => m.status === 'Presente')
+        .sort((a: Member, b: Member) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
     const votesForElection = electionToManage ? Object.values(votes).map((v: { [electionId: string]: string[] }) => v[electionToManage.id!]).filter(Boolean).length : 0;
     const pendingVoters = accreditedVoters.length - votesForElection;
 
@@ -875,42 +1017,7 @@ function SessionManagement({ session, votes, onAccredit, onToggleEligibility, on
     </> );
 }
 
-function VoterSessionView({ session, votes, onVoteClick, onExit }: VoterSessionViewProps) {
-    const getStatusLabel = (election: Election) => {
-        switch(election.status) {
-            case 'Abierta': return <span className="text-xs font-semibold text-green-600">Votación abierta</span>;
-            case 'Cerrada': return <span className="text-xs font-semibold text-red-600">Votación cerrada</span>;
-            case 'Prevista': return <span className="text-xs font-semibold text-yellow-600">Aún no abierta</span>;
-            default: return null;
-        }
-    };
-    return (
-        <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md">
-            <div className="flex justify-between items-center"> <h2 className="text-2xl font-bold text-cyan-700 mb-2">{session.name}</h2> <NavigationButton onClick={onExit} variant="exit" className="text-sm">Salir</NavigationButton> </div>
-            <p className="text-slate-500 mb-6">Selecciona una votación para participar.</p>
-            <div className="space-y-3">
-                {Object.values(session.elections).map(election => {
-                    const hasVoted = election.id ? votes[election.id] : false;
-                    let statusText = 'Pendiente de voto';
-                    let statusColor = 'text-slate-500';
-                    if (hasVoted) { statusText = 'Ya has votado'; statusColor = 'text-green-600'; }
-                    else if (election.status === 'Cerrada') { statusText = 'No has votado'; statusColor = 'text-red-600'; }
-                    return (
-                        <div key={election.id} className={`p-4 rounded-lg border border-slate-200 ${hasVoted || election.status === 'Cerrada' ? 'bg-slate-100' : 'bg-white'}`}>
-                            <div className="flex justify-between items-center">
-                                <div><p className="font-bold">{election.name}</p><p className={`text-sm ${statusColor}`}>{statusText}</p></div>
-                                <div className="flex flex-col items-end gap-2">
-                                    {getStatusLabel(election)}
-                                    {election.status === 'Abierta' && election.id && <button onClick={() => onVoteClick(election.id!)} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-1 px-3 rounded-lg text-sm">{hasVoted ? 'Modificar' : 'Votar'}</button>}
-                                </div>
-                            </div>
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-}
+// VoterSessionView ahora se importa desde ./components/VoterSessionView
 
 function BallotPage({ session, election, voterKey, previousVotes, onVote, onBack }: BallotPageProps) {
     const [selections, setSelections] = useState<string[]>(previousVotes);
@@ -935,7 +1042,19 @@ function VoteSuccessPage({ onBackToSession, onExit }: VoteSuccessPageProps) {
   ); 
 }
 
-function ResultsPage({ session, election, votes, onBack, onAddElection }: ResultsPageProps) {
+function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElection }: ResultsPageProps) {
+    // Usar suscripción en tiempo real para los votos de esta elección
+    const { votes: realtimeVotes, loading: votesLoading } = useRealtimeVotes(session.id || null, election.id || null);
+    
+    // Usar votos en tiempo real si están disponibles
+    const votes = useMemo(() => {
+        // Convertir votos en tiempo real al formato esperado
+        if (Object.keys(realtimeVotes).length > 0) {
+            return realtimeVotes;
+        }
+        return initialVotes;
+    }, [realtimeVotes, initialVotes]);
+
     const electionVoterKeys = new Set(session.members.map((v: Member) => v.key));
     const electionVotes = Object.entries(votes).filter(([key]) => electionVoterKeys.has(key)).map(([, userVotes]: [string, { [electionId: string]: string[] }]) => election.id ? userVotes[election.id] : undefined).filter(Boolean);
     const papeletasEmitidas = electionVotes.length;
@@ -960,7 +1079,7 @@ function ResultsPage({ session, election, votes, onBack, onAddElection }: Result
         onBack();
     };
 
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a gestión</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && <div className="my-4"><button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button></div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a gestión</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> {votesLoading && <div className="text-center py-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500 mx-auto mb-2"></div><p className="text-sm text-slate-500">Actualizando resultados...</p></div>} <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && <div className="my-4"><button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button></div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
 }
 
 function SuperAdminPanel({ admins, onAddAdmin, onDeleteAdmin, onBack }: SuperAdminPanelProps) {

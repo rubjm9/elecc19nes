@@ -1,6 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button, Modal, Input, Textarea } from '../components/ui';
 import type { AdminDashboardProps } from '../types';
+import { useRealtimeSessions } from '../hooks/useRealtimeData';
+import { FirestoreService } from '../firebase/firestoreService';
+import type { FirestoreSession, FirestoreMember, FirestoreElection } from '../firebase/firestoreService';
+import type { Session } from '../types';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
   user, 
@@ -13,6 +17,101 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [showCreateSession, setShowCreateSession] = useState(false);
   const [sessionName, setSessionName] = useState('');
   const [membersList, setMembersList] = useState('');
+  const { sessions: realtimeSessions, loading: sessionsLoading } = useRealtimeSessions();
+  
+  // Combinar sesiones del db prop (que se actualiza cuando se crea una sesión) con las de tiempo real
+  const allSessions = useMemo(() => {
+    // Usar sesiones en tiempo real como fuente principal, pero combinar con db.sessions
+    const combined: { [key: string]: FirestoreSession } = { ...db.sessions };
+    
+    // Actualizar/agregar sesiones desde tiempo real
+    Object.entries(realtimeSessions).forEach(([sessionId, session]) => {
+      combined[sessionId] = session;
+    });
+    
+    return combined;
+  }, [realtimeSessions, db.sessions]);
+
+  // Inicializar con las sesiones del db, pero también actualizar cuando cambien
+  const [sessionsData, setSessionsData] = useState<{ [key: string]: Session }>(() => {
+    console.log('AdminDashboard - Inicializando sessionsData con:', Object.keys(db.sessions || {}));
+    return db.sessions || {};
+  });
+  
+  // Actualizar sessionsData cuando db.sessions cambie (por ejemplo, después de crear una sesión)
+  useEffect(() => {
+    if (Object.keys(db.sessions).length > 0) {
+      console.log('AdminDashboard - db.sessions cambió, actualizando sessionsData');
+      setSessionsData(prev => {
+        const updated = { ...prev, ...db.sessions };
+        console.log('AdminDashboard - sessionsData actualizado:', Object.keys(updated));
+        return updated;
+      });
+    }
+  }, [db.sessions]);
+
+  // Cargar miembros y elecciones para cada sesión en tiempo real
+  useEffect(() => {
+    const loadSessionsData = async () => {
+      console.log('AdminDashboard - loadSessionsData iniciado');
+      console.log('AdminDashboard - allSessions:', allSessions);
+      console.log('AdminDashboard - db.sessions:', db.sessions);
+      
+      const sessionsWithData: { [key: string]: Session } = {};
+      
+      // Primero, usar las sesiones del db que ya tienen datos completos
+      Object.entries(db.sessions).forEach(([sessionId, session]) => {
+        sessionsWithData[sessionId] = session;
+      });
+      
+      // Luego, cargar datos para sesiones que no están en db o que necesitan actualización
+      const sessionEntries = Object.entries(allSessions);
+      console.log('AdminDashboard - sessionEntries a procesar:', sessionEntries.length);
+      
+      for (const [sessionId, session] of sessionEntries) {
+        // Si ya tenemos datos completos del db, solo actualizar si la sesión cambió
+        if (sessionsWithData[sessionId] && 
+            sessionsWithData[sessionId].name === session.name &&
+            sessionsWithData[sessionId].createdBy === session.createdBy) {
+          console.log(`AdminDashboard - Sesión ${sessionId} ya tiene datos completos, saltando`);
+          continue; // Ya tenemos datos completos, no necesitamos recargar
+        }
+        
+        console.log(`AdminDashboard - Cargando datos para sesión ${sessionId}: ${session.name}`);
+        try {
+          const [members, elections] = await Promise.all([
+            FirestoreService.getMembersBySession(sessionId),
+            FirestoreService.getElectionsBySession(sessionId)
+          ]);
+
+          sessionsWithData[sessionId] = {
+            ...session,
+            members,
+            elections
+          };
+          console.log(`AdminDashboard - Sesión ${sessionId} cargada:`, sessionsWithData[sessionId]);
+        } catch (error) {
+          console.error(`Error loading data for session ${sessionId}:`, error);
+          // Si hay error, usar datos del db si existen
+          if (db.sessions[sessionId]) {
+            sessionsWithData[sessionId] = db.sessions[sessionId];
+          } else {
+            sessionsWithData[sessionId] = {
+              ...session,
+              members: [],
+              elections: {}
+            };
+          }
+        }
+      }
+      
+      console.log('AdminDashboard - sessionsWithData final:', Object.keys(sessionsWithData));
+      setSessionsData(sessionsWithData);
+    };
+
+    // Cargar datos siempre que cambien las sesiones
+    loadSessionsData();
+  }, [allSessions, db.sessions]);
 
   const handleCreateSession = () => {
     if (sessionName.trim() && membersList.trim()) {
@@ -23,7 +122,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const sessions = Object.values(db.sessions);
+  // Filtrar sesiones según el rol del usuario
+  const sessions = useMemo(() => {
+    const allSessions = Object.values(sessionsData);
+    
+    // Debug: ver qué sesiones tenemos y qué usuario
+    console.log('AdminDashboard - Todas las sesiones:', allSessions);
+    console.log('AdminDashboard - Usuario:', user);
+    console.log('AdminDashboard - sessionsData keys:', Object.keys(sessionsData));
+    
+    if (user.role === 'superadmin') {
+      return allSessions;
+    }
+    
+    const filtered = allSessions.filter(session => {
+      const matches = session.createdBy === user.username;
+      console.log(`AdminDashboard - Sesión "${session.name}": createdBy="${session.createdBy}", user.username="${user.username}", matches=${matches}`);
+      return matches;
+    });
+    
+    console.log('AdminDashboard - Sesiones filtradas:', filtered);
+    return filtered;
+  }, [sessionsData, user.role, user.username]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-white to-cyan-100 p-6">
@@ -78,11 +198,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             Sesiones ({sessions.length})
           </h2>
           
-          {sessions.length === 0 ? (
+          {sessionsLoading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+              <p className="text-slate-500 text-lg">Cargando sesiones...</p>
+            </div>
+          ) : sessions.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-slate-500 text-lg">
                 No hay sesiones creadas. Crea la primera sesión para comenzar.
               </p>
+              {/* Debug info - remover después */}
+              <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-left text-xs">
+                <p className="font-bold mb-2">Información de depuración:</p>
+                <p>Total sesiones en sessionsData: {Object.keys(sessionsData).length}</p>
+                <p>Total sesiones en allSessions: {Object.keys(allSessions).length}</p>
+                <p>Total sesiones en db.sessions: {Object.keys(db.sessions).length}</p>
+                <p>Usuario: {user.username} (rol: {user.role})</p>
+                {Object.keys(sessionsData).length > 0 && (
+                  <div className="mt-2">
+                    <p className="font-bold">Sesiones en sessionsData:</p>
+                    {Object.entries(sessionsData).map(([id, s]) => (
+                      <p key={id}>- {s.name} (createdBy: {s.createdBy})</p>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

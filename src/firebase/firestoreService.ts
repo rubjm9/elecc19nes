@@ -458,7 +458,9 @@ export class FirestoreService {
     }
   }
 
-  // Escuchar cambios en tiempo real (opcional)
+  // === SUSCRIPCIONES EN TIEMPO REAL ===
+  
+  // Escuchar cambios en todas las sesiones
   static subscribeToSessions(callback: (sessions: { [key: string]: FirestoreSession }) => void) {
     return onSnapshot(collection(db, 'sessions'), (snapshot) => {
       const sessions: { [key: string]: FirestoreSession } = {};
@@ -466,6 +468,98 @@ export class FirestoreService {
         sessions[doc.id] = { ...doc.data() as FirestoreSession, id: doc.id };
       });
       callback(sessions);
+    }, (error) => {
+      console.error('Error in subscribeToSessions:', error);
+    });
+  }
+
+  // Escuchar cambios en una sesión específica
+  static subscribeToSession(sessionId: string, callback: (session: FirestoreSession | null) => void) {
+    return onSnapshot(doc(db, 'sessions', sessionId), (snapshot) => {
+      if (snapshot.exists()) {
+        callback({ ...snapshot.data() as FirestoreSession, id: snapshot.id });
+      } else {
+        callback(null);
+      }
+    }, (error) => {
+      console.error('Error in subscribeToSession:', error);
+    });
+  }
+
+  // Escuchar cambios en miembros de una sesión
+  static subscribeToMembers(sessionId: string, callback: (members: FirestoreMember[]) => void) {
+    const q = query(collection(db, 'members'), where('sessionId', '==', sessionId));
+    return onSnapshot(q, (snapshot) => {
+      const members: FirestoreMember[] = [];
+      snapshot.forEach((doc) => {
+        members.push({ ...doc.data() as FirestoreMember, id: doc.id });
+      });
+      callback(members);
+    }, (error) => {
+      console.error('Error in subscribeToMembers:', error);
+    });
+  }
+
+  // Escuchar cambios en elecciones de una sesión
+  static subscribeToElections(sessionId: string, callback: (elections: { [key: string]: FirestoreElection }) => void) {
+    const q = query(collection(db, 'elections'), where('sessionId', '==', sessionId));
+    return onSnapshot(q, (snapshot) => {
+      const elections: { [key: string]: FirestoreElection } = {};
+      snapshot.forEach((doc) => {
+        elections[doc.id] = { ...doc.data() as FirestoreElection, id: doc.id };
+      });
+      callback(elections);
+    }, (error) => {
+      console.error('Error in subscribeToElections:', error);
+    });
+  }
+
+  // Escuchar cambios en votos de una sesión
+  static subscribeToVotes(sessionId: string, callback: (votes: { [voterKey: string]: { [electionId: string]: string[] } }) => void) {
+    const q = query(collection(db, 'votes'), where('sessionId', '==', sessionId));
+    return onSnapshot(q, (snapshot) => {
+      const votes: { [voterKey: string]: { [electionId: string]: string[] } } = {};
+      snapshot.forEach((doc) => {
+        const vote = doc.data() as FirestoreVote;
+        if (!votes[vote.voterKey]) {
+          votes[vote.voterKey] = {};
+        }
+        votes[vote.voterKey][vote.electionId] = vote.selections;
+      });
+      callback(votes);
+    }, (error) => {
+      console.error('Error in subscribeToVotes:', error);
+    });
+  }
+
+  // Escuchar cambios en votos de una elección específica
+  static subscribeToVotesByElection(electionId: string, callback: (votes: { [voterKey: string]: string[] }) => void) {
+    const q = query(collection(db, 'votes'), where('electionId', '==', electionId));
+    return onSnapshot(q, (snapshot) => {
+      const votes: { [voterKey: string]: string[] } = {};
+      snapshot.forEach((doc) => {
+        const vote = doc.data() as FirestoreVote;
+        votes[vote.voterKey] = vote.selections;
+      });
+      callback(votes);
+    }, (error) => {
+      console.error('Error in subscribeToVotesByElection:', error);
+    });
+  }
+
+  // Escuchar cambios en administradores
+  static subscribeToAdmins(callback: (admins: { [key: string]: FirestoreAdmin }) => void) {
+    return onSnapshot(collection(db, 'admins'), (snapshot) => {
+      const admins: { [key: string]: FirestoreAdmin } = {};
+      snapshot.forEach((doc) => {
+        const data = doc.data() as FirestoreAdmin;
+        // Usar el nombre como key para mantener compatibilidad
+        const adminKey = data.name.toLowerCase().replace(/\s+/g, '');
+        admins[adminKey] = { ...data, id: doc.id };
+      });
+      callback(admins);
+    }, (error) => {
+      console.error('Error in subscribeToAdmins:', error);
     });
   }
 }
