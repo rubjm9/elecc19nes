@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { FirestoreService } from './firebase/firestoreService';
-import { useRealtimeVotes, useRealtimeSession } from './hooks/useRealtimeData';
+import { useRealtimeVotes, useRealtimeSession, useRealtimeSessions } from './hooks/useRealtimeData';
 import { getElectionsOrdered } from './utils';
 import { VoterSessionView } from './components/VoterSessionView';
 import { ConfirmDeleteModal } from './components/ui';
@@ -81,6 +81,7 @@ interface SessionManagementProps {
   session: Session;
   votes: Database['votes'];
   onAccredit: (sessionId: string, memberId: string) => void;
+  onUnaccredit: (sessionId: string, memberId: string) => void;
   onToggleEligibility: (sessionId: string, memberId: string) => void;
   onChangeElectionStatus: (sessionId: string, electionId: string, status: Election['status']) => void;
   onAddElection: (sessionId: string, electionData: Omit<Election, 'id'>) => void;
@@ -114,7 +115,6 @@ interface ResultsPageProps {
   votes: Database['votes'];
   onBack: () => void;
   onAddElection?: (sessionId: string, electionData: Omit<Election, 'id'>) => void;
-  onViewTiebreaker?: (electionId: string) => void;
   voterView?: boolean;
 }
 
@@ -174,6 +174,31 @@ export default function App() {
 
   // Datos en tiempo real de la sesión actual (para sync con db y que acreditar/ballot/results funcionen entre ventanas)
   const { session: realtimeSessionData, members: realtimeMembers, elections: realtimeElections } = useRealtimeSession(currentSessionId);
+  const { sessions: realtimeSessions } = useRealtimeSessions();
+
+  // Fusionar lista de sesiones en tiempo real en db (para que nuevas sesiones aparezcan sin refrescar)
+  useEffect(() => {
+    if (!realtimeSessions || Object.keys(realtimeSessions).length === 0) return;
+    setDb((prev) => {
+      let changed = false;
+      const nextSessions: { [key: string]: Session } = { ...prev.sessions };
+      Object.entries(realtimeSessions).forEach(([sid, fs]) => {
+        const existing = prev.sessions[sid];
+        if (!existing || existing.name !== fs.name || existing.createdBy !== fs.createdBy) {
+          nextSessions[sid] = {
+            ...fs,
+            id: sid,
+            members: existing?.members ?? [],
+            elections: existing?.elections ?? {},
+            electionOrder: fs.electionOrder
+          } as Session;
+          changed = true;
+        }
+      });
+      if (!changed) return prev;
+      return { ...prev, sessions: nextSessions };
+    });
+  }, [realtimeSessions]);
 
   // Fusionar sesión en tiempo real en db para currentSessionId (solo esa sesión)
   useEffect(() => {
@@ -523,30 +548,43 @@ export default function App() {
       const member = db.sessions[sessionId].members.find(m => m.id === memberId);
       if (!member) return;
       
-      const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
-      const newKey = generateKey();
+      // La credencial es permanente y se asigna al crear el miembro; solo actualizar estado (o asignar key si falta por datos antiguos)
+      const updates: { status: 'Presente'; key?: string } = { status: 'Presente' };
+      if (!member.key || member.key === '') {
+        const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
+        updates.key = generateKey();
+      }
+      await FirestoreService.updateMember(memberId, updates);
       
-      // Actualizar en Firestore
-      await FirestoreService.updateMember(memberId, { 
-        status: 'Presente', 
-        key: newKey 
-      });
-      
-      // Actualizar estado local
       setDb((prev: Database) => { 
         const newDb = JSON.parse(JSON.stringify(prev)); 
-        const member = newDb.sessions[sessionId].members.find((m: Member) => m.id === memberId); 
-        if (member) { 
-          member.status = 'Presente'; 
-          member.key = newKey; 
-        } 
+        const m = newDb.sessions[sessionId].members.find((x: Member) => x.id === memberId); 
+        if (m) { m.status = 'Presente'; if (updates.key) m.key = updates.key; }
         return newDb; 
       });
       
-      console.log('Miembro acreditado:', member.name, 'Clave:', newKey);
+      console.log('Miembro acreditado:', member.name);
     } catch (error) {
       console.error('Error accrediting member:', error);
       setError('Error al acreditar al miembro');
+    } finally {
+      setLoading(false);
+    }
+  };
+  const unaccreditMember = async (sessionId: string, memberId: string) => {
+    try {
+      setLoading(true);
+      // Solo cambiar estado; la credencial (key) no se modifica para poder reacreditar con el mismo código
+      await FirestoreService.updateMember(memberId, { status: 'Invitado' });
+      setDb((prev: Database) => {
+        const newDb = JSON.parse(JSON.stringify(prev));
+        const member = newDb.sessions[sessionId]?.members?.find((m: Member) => m.id === memberId);
+        if (member) member.status = 'Invitado';
+        return newDb;
+      });
+    } catch (error) {
+      console.error('Error unaccrediting member:', error);
+      setError('Error al desacreditar al miembro');
     } finally {
       setLoading(false);
     }
@@ -817,7 +855,7 @@ export default function App() {
       case 'superAdminPanel': return <SuperAdminPanel admins={db.admins} onAddAdmin={addAdmin} onDeleteAdmin={deleteAdmin} onBack={() => setPage('adminDashboard')} />;
       case 'sessionManagement': 
         if (!currentSessionId || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
-        return <SessionManagement session={db.sessions[currentSessionId]} votes={db.votes} onAccredit={accreditMember} onToggleEligibility={toggleMemberEligibility} onChangeElectionStatus={changeElectionStatus} onAddElection={addElectionToSession} onAddMembers={addMembersToSession} onBack={() => setPage('adminDashboard')} onViewResults={(elecId: string) => { setCurrentElectionId(elecId); setPage('results'); }} onReorderElections={reorderElections} isXlsxLoaded={isXlsxLoaded} user={user?.role === 'superadmin' ? user : undefined} onDeleteMember={user?.role === 'superadmin' ? deleteMember : undefined} onDeleteElection={user?.role === 'superadmin' ? deleteElection : undefined}/>;
+        return <SessionManagement session={db.sessions[currentSessionId]} votes={db.votes} onAccredit={accreditMember} onUnaccredit={unaccreditMember} onToggleEligibility={toggleMemberEligibility} onChangeElectionStatus={changeElectionStatus} onAddElection={addElectionToSession} onAddMembers={addMembersToSession} onBack={() => setPage('adminDashboard')} onViewResults={(elecId: string) => { setCurrentElectionId(elecId); setPage('results'); }} onReorderElections={reorderElections} isXlsxLoaded={isXlsxLoaded} user={user?.role === 'superadmin' ? user : undefined} onDeleteMember={user?.role === 'superadmin' ? deleteMember : undefined} onDeleteElection={user?.role === 'superadmin' ? deleteElection : undefined}/>;
       case 'voterSession': 
         if (!currentSessionId || !voterKey || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
         // Asegurar que la sesión tenga el id correcto
@@ -843,7 +881,7 @@ export default function App() {
         const sessionForResults = db.sessions[currentSessionId];
         const electionForResults = sessionForResults.elections[currentElectionId];
         if (!electionForResults) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
-        return <ResultsPage session={sessionForResults} election={electionForResults} votes={db.votes} onBack={() => setPage('sessionManagement')} onAddElection={addElectionToSession} onViewTiebreaker={(id) => setCurrentElectionId(id)}/>;
+        return <ResultsPage session={sessionForResults} election={electionForResults} votes={db.votes} onBack={() => setPage('sessionManagement')} onAddElection={addElectionToSession}/>;
       default: return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
     }
   };
@@ -1032,12 +1070,12 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
                 {user.role === 'superadmin' && <button onClick={onManageAdmins} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 text-white font-bold py-3 rounded-lg shadow-md"><UsersIcon /> Gestionar admins</button>}
             </div>
             <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Sesiones de votación</h3> 
-            <div className="space-y-4 max-h-96 overflow-y-auto"> {userSessions.length > 0 ? userSessions.map(session => ( <div key={session.id} className="bg-slate-50 border border-slate-200 p-4 rounded-lg relative"> {onDeleteSession && session.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: session.id!, name: session.name }); }} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar sesión"><XIcon /></button>} <div className="flex justify-between items-start"> <div><h4 className="font-bold text-slate-800">{session.name}</h4><p className="text-sm text-slate-500">{session.members.length} miembros</p></div> <button onClick={() => session.id && onManageSession(session.id)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-lg text-sm">Gestionar</button> </div> </div> )) : <p className="text-slate-500 text-center py-4">No has creado ninguna sesión.</p>} </div> 
+            <div className="space-y-4 max-h-96 overflow-y-auto"> {userSessions.length > 0 ? userSessions.map(session => ( <div key={session.id} className="bg-slate-50 border border-slate-200 p-4 pr-9 rounded-lg relative"> {onDeleteSession && session.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: session.id!, name: session.name }); }} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar sesión"><XIcon /></button>} <div className="flex justify-between items-start"> <div><h4 className="font-bold text-slate-800">{session.name}</h4><p className="text-sm text-slate-500">{session.members.length} miembros</p></div> <button onClick={() => session.id && onManageSession(session.id)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-lg text-sm">Gestionar</button> </div> </div> )) : <p className="text-slate-500 text-center py-4">No has creado ninguna sesión.</p>} </div> 
         </div>
     </> );
 }
 
-function SessionManagement({ session: initialSession, votes: initialVotes, onAccredit, onToggleEligibility, onChangeElectionStatus, onAddElection, onAddMembers, onBack, onViewResults, onReorderElections, isXlsxLoaded, user, onDeleteMember, onDeleteElection }: SessionManagementProps) {
+function SessionManagement({ session: initialSession, votes: initialVotes, onAccredit, onUnaccredit, onToggleEligibility: _onToggleEligibility, onChangeElectionStatus, onAddElection, onAddMembers, onBack, onViewResults, onReorderElections, isXlsxLoaded, user, onDeleteMember, onDeleteElection }: SessionManagementProps) {
     // Usar suscripciones en tiempo real
     const { session: realtimeSession, members, elections, loading: _sessionLoading } = useRealtimeSession(initialSession?.id || null);
     const { votes: realtimeVotes, loading: _votesLoading } = useRealtimeVotes(initialSession?.id || null);
@@ -1153,14 +1191,14 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
             <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton>
             <h2 className="text-2xl font-bold text-cyan-700 mb-4">{session.name}</h2>
             <div className="border-b border-slate-200 mb-4 flex gap-2"> <TabButton tabName="acreditacion" label="Acreditación" /> <TabButton tabName="elecciones" label="Elecciones" /> </div>
-            {activeTab === 'acreditacion' && ( <div> <input type="text" placeholder="Buscar miembro..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-4"/> <div className="space-y-2 max-h-64 overflow-y-auto pr-2 mb-4"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between relative"> {user?.role === 'superadmin' && onDeleteMember && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'member', id: member.id!, name: member.name }); }} className="absolute top-1 right-1 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar elector"><XIcon /></button>} <div><p className="font-semibold">{member.name}</p><p className={`text-sm ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Acreditar</button> : <div className="flex items-center gap-2"><span className="font-mono bg-slate-200 px-2 py-1 rounded text-sm">{member.key}</span><button onClick={() => session.id && member.id && onToggleEligibility(session.id, member.id)} className={`text-sm p-1 rounded-full ${member.isEligible ? 'text-green-600' : 'text-red-600'}`}>{member.isEligible ? <CheckCircleIcon/> : <XCircleIcon/>}</button></div>} </div> ))} </div> <div className="border-t border-slate-200 pt-4"> <h4 className="font-semibold text-slate-700 mb-2">Añadir nuevos miembros</h4> <form onSubmit={handleAddMembers} className="space-y-2"> <textarea value={newMembersList} onChange={e => setNewMembersList(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" placeholder="Nombre, email@opcional.com - Solo una persona por línea"></textarea> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg">Añadir</button> </form> </div> <button onClick={downloadMemberList} disabled={!isXlsxLoaded} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg shadow disabled:opacity-50"><DownloadIcon /> Descargar lista</button> </div> )}
+            {activeTab === 'acreditacion' && ( <div> <input type="text" placeholder="Buscar miembro..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-4"/> <div className="space-y-2 max-h-64 overflow-y-auto pr-2 mb-4"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 pr-8 rounded-lg flex items-center justify-between relative"> {user?.role === 'superadmin' && onDeleteMember && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'member', id: member.id!, name: member.name }); }} className="absolute top-1 right-1 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar elector"><XIcon /></button>} <div><p className="font-semibold">{member.name}</p><p className={`text-sm ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status === 'Invitado' ? 'Ausente' : member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Acreditar</button> : <div className="flex items-center gap-2"><span className="font-mono bg-slate-200 px-2 py-1 rounded text-sm">{member.key}</span><button type="button" onClick={() => session.id && member.id && onUnaccredit(session.id, member.id)} className="p-1.5 rounded text-red-600 hover:bg-red-100 hover:text-red-700" title="Desacreditar" aria-label="Desacreditar"><XIcon /></button></div>} </div> ))} </div> <div className="border-t border-slate-200 pt-4"> <h4 className="font-semibold text-slate-700 mb-2">Añadir nuevos miembros</h4> <form onSubmit={handleAddMembers} className="space-y-2"> <textarea value={newMembersList} onChange={e => setNewMembersList(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" placeholder="Nombre, email@opcional.com - Solo una persona por línea"></textarea> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg">Añadir</button> </form> </div> <button onClick={downloadMemberList} disabled={!isXlsxLoaded} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg shadow disabled:opacity-50"><DownloadIcon /> Descargar lista</button> </div> )}
             {activeTab === 'elecciones' && ( <div> <div className="space-y-3"> {electionsList.map(election => {
                 const totalPapeletas = session.members.filter(m => m.status === 'Presente').length;
                 const votesCount = Object.values(votes).map(v => election.id ? v[election.id] : undefined).filter(Boolean).length;
                 const progress = totalPapeletas > 0 ? (votesCount / totalPapeletas) * 100 : 0;
                 const isDragging = draggedElectionId === election.id;
                 return (
-                <div key={election.id} draggable={!!onReorderElections} onDragStart={() => onReorderElections && election.id && handleDragStart(election.id)} onDragOver={handleDragOver} onDrop={(e) => election.id && handleDrop(e, election.id)} onDragEnd={handleDragEnd} className={`bg-slate-100 p-3 rounded-lg relative ${onReorderElections ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-50' : ''}`}> {user?.role === 'superadmin' && onDeleteElection && election.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'election', id: election.id!, name: election.name }); }} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar elección"><XIcon /></button>} <p className="font-bold">{election.name}</p>
+                <div key={election.id} draggable={!!onReorderElections} onDragStart={() => onReorderElections && election.id && handleDragStart(election.id)} onDragOver={handleDragOver} onDrop={(e) => election.id && handleDrop(e, election.id)} onDragEnd={handleDragEnd} className={`bg-slate-100 p-3 pr-9 rounded-lg relative ${onReorderElections ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-50' : ''}`}> {user?.role === 'superadmin' && onDeleteElection && election.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'election', id: election.id!, name: election.name }); }} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar elección"><XIcon /></button>} <p className="font-bold">{election.name}</p>
                  {election.status === 'Abierta' && <div className="mt-2"> <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesCount} / {totalPapeletas}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: `${progress}%` }}></div></div> </div>}
                  <div className="flex justify-between items-center mt-2"> <span className={`text-xs font-semibold px-2 py-1 rounded-full ${ election.status === 'Abierta' ? 'bg-green-100 text-green-800' : election.status === 'Cerrada' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' }`}>{election.status}</span> <div className="flex gap-2"> {election.status === 'Prevista' && <button onClick={() => session.id && election.id && onChangeElectionStatus(session.id, election.id, 'Abierta')} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Abrir</button>} {election.status === 'Abierta' && <button onClick={() => openProgressModal(election)} className="bg-slate-500 hover:bg-slate-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Gestionar</button>} {election.status === 'Abierta' && <button onClick={() => openCloseModal(election)} className="bg-red-500 hover:bg-red-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Cerrar</button>} {election.status === 'Cerrada' && election.id && <button onClick={() => onViewResults(election.id!)} className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Resultados</button>} </div> </div> </div>
             )})} </div> <button onClick={() => setShowCreateElection(true)} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 rounded-lg"><PlusIcon /> Añadir elección</button> <Modal isOpen={showCreateElection} onClose={() => setShowCreateElection(false)} title="Crear nueva elección"> <form onSubmit={handleCreateElection} className="space-y-4"> <input type="text" placeholder="Nombre de la elección" value={newElection.name} onChange={e => setNewElection({...newElection, name: e.target.value})} className="w-full bg-slate-50 border p-2 rounded-lg" required/> <textarea placeholder="Descripción / Instrucciones" value={newElection.description} onChange={e => setNewElection({...newElection, description: e.target.value})} className="w-full bg-slate-50 border p-2 rounded-lg" rows={3}></textarea> <input type="number" placeholder="Puestos a elegir" value={newElection.positionsToElect} onChange={e => setNewElection({...newElection, positionsToElect: parseInt(e.target.value)})} className="w-full bg-slate-50 border p-2 rounded-lg" min="1" required/> <div className="flex justify-end gap-3"><button type="button" onClick={() => setShowCreateElection(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg">Cancelar</button><button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Crear</button></div> </form> </Modal> </div> )}
@@ -1193,7 +1231,7 @@ function VoteSuccessPage({ onBackToSession, onExit }: VoteSuccessPageProps) {
   ); 
 }
 
-function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElection, onViewTiebreaker, voterView }: ResultsPageProps) {
+function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElection, voterView }: ResultsPageProps) {
     // Miembros en tiempo real para recuento correcto entre ventanas
     const { members: realtimeMembers } = useRealtimeSession(session.id || null);
     const { votes: realtimeVotes, loading: votesLoading } = useRealtimeVotes(session.id || null, election.id || null);
@@ -1256,7 +1294,7 @@ function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElec
         );
     }
 
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a gestión</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> {votesLoading && <div className="text-center py-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500 mx-auto mb-2"></div><p className="text-sm text-slate-500">Actualizando resultados...</p></div>} <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && onAddElection && <div className="my-4">{tiebreakerElection && onViewTiebreaker ? <button onClick={() => onViewTiebreaker(tiebreakerElection.id!)} className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 rounded-lg">Ver votación de desempate</button> : <button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button>}</div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a gestión</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> {votesLoading && <div className="text-center py-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500 mx-auto mb-2"></div><p className="text-sm text-slate-500">Actualizando resultados...</p></div>} <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && onAddElection && !tiebreakerElection && <div className="my-4"><button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button></div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
 }
 
 function SuperAdminPanel({ admins, onAddAdmin, onDeleteAdmin, onBack }: SuperAdminPanelProps) {
@@ -1266,7 +1304,7 @@ function SuperAdminPanel({ admins, onAddAdmin, onDeleteAdmin, onBack }: SuperAdm
     const [deleteTarget, setDeleteTarget] = useState<{ adminId: string; adminName: string } | null>(null);
     const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (!username || !password || !name) { alert('Por favor, completa todos los campos.'); return; } onAddAdmin(username, password, name); setUsername(''); setPassword(''); setName(''); };
     const managerAdmins = Object.entries(admins).filter(([, details]: [string, Admin]) => details.role === 'manager');
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-4">Gestionar administradores</h2> <div className="mb-6 border-t border-slate-200 pt-4"> <h3 className="text-lg font-semibold text-slate-700 mb-2">Crear nuevo administrador</h3> <form onSubmit={handleSubmit} className="space-y-3"> <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre completo" /> <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre de usuario" /> <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Contraseña" /> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg shadow">Crear administrador</button> </form> </div> <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Lista de administradores</h3> <div className="space-y-2 max-h-60 overflow-y-auto pr-2"> {managerAdmins.map(([adminId, details]) => ( <div key={adminId} className="bg-slate-100 p-3 rounded-lg flex justify-between items-center relative"> <button type="button" onClick={() => setDeleteTarget({ adminId, adminName: details.name })} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar administrador"><XIcon /></button> <div> <p className="font-semibold text-slate-800">{details.name}</p> <p className="text-sm text-slate-500">Usuario: {details.username}</p> </div> </div> ))} </div> {deleteTarget && <ConfirmDeleteModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={() => { onDeleteAdmin(deleteTarget.adminId, deleteTarget.adminName); setDeleteTarget(null); }} title="Eliminar administrador" message={`¿Eliminar a ${deleteTarget.adminName}? Esta acción no se puede deshacer.`} />} </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-4">Gestionar administradores</h2> <div className="mb-6 border-t border-slate-200 pt-4"> <h3 className="text-lg font-semibold text-slate-700 mb-2">Crear nuevo administrador</h3> <form onSubmit={handleSubmit} className="space-y-3"> <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre completo" /> <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre de usuario" /> <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Contraseña" /> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg shadow">Crear administrador</button> </form> </div> <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Lista de administradores</h3> <div className="space-y-2 max-h-60 overflow-y-auto pr-2"> {managerAdmins.map(([adminId, details]) => ( <div key={adminId} className="bg-slate-100 p-3 pr-8 rounded-lg flex justify-between items-center relative"> <button type="button" onClick={() => setDeleteTarget({ adminId, adminName: details.name })} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar administrador"><XIcon /></button> <div> <p className="font-semibold text-slate-800">{details.name}</p> <p className="text-sm text-slate-500">Usuario: {details.username}</p> </div> </div> ))} </div> {deleteTarget && <ConfirmDeleteModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={() => { onDeleteAdmin(deleteTarget.adminId, deleteTarget.adminName); setDeleteTarget(null); }} title="Eliminar administrador" message={`¿Eliminar a ${deleteTarget.adminName}? Esta acción no se puede deshacer.`} />} </div> );
 }
 
 
