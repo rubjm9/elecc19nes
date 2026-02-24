@@ -1258,14 +1258,42 @@ function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElec
     const maxVotes = sortedResults.length > 0 ? (sortedResults[0][1] as number) : 0;
     const getVoteText = (count: number) => count === 1 ? '1 voto' : `${count} votos`;
 
-    const winners = sortedResults.filter(([,count]) => (count as number) === maxVotes && maxVotes > 0);
-    const tiedCandidates = winners.length > election.positionsToElect ? winners.map(([name]) => name) : [];
+    const n = election.positionsToElect;
+    let clearWinners: [string, number][] = [];
+    let tiedCandidates: string[] = [];
+    let tiebreakerPositions = 0;
+    let electedEntries: [string, number][] = [];
+    let tiedVoteCount = 0;
+
+    if (sortedResults.length > 0) {
+      if (sortedResults.length <= n) {
+        electedEntries = sortedResults.map(([name, count]) => [name, count as number]);
+      } else {
+        const cutoffCount = sortedResults[n - 1][1] as number;
+        clearWinners = sortedResults.filter(([, c]) => (c as number) > cutoffCount);
+        const tiedAtCutoff = sortedResults.filter(([, c]) => (c as number) === cutoffCount);
+        const positionsRemaining = n - clearWinners.length;
+        const needTiebreaker = tiedAtCutoff.length > positionsRemaining;
+        if (needTiebreaker) {
+          tiedCandidates = tiedAtCutoff.map(([name]) => name);
+          tiebreakerPositions = positionsRemaining;
+          electedEntries = clearWinners.map(([name, count]) => [name, count as number]);
+          tiedVoteCount = cutoffCount;
+        } else {
+          electedEntries = sortedResults.slice(0, n).map(([name, count]) => [name, count as number]);
+        }
+      }
+    }
+
+    const electedText = electedEntries.map(([name, count]) => `${name} (${getVoteText(count)})`).join(', ');
+
     const tiebreakerElection = session.elections ? Object.values(session.elections).find((e: Election) => e.name === `Desempate: ${election.name}`) : undefined;
 
     const createTiebreaker = () => {
-        if (!onAddElection) return;
-        const tiebreakerElection = { name: `Desempate: ${election.name}`, description: `Votación de desempate. Candidatos: ${tiedCandidates.join(', ')}.`, positionsToElect: election.positionsToElect, status: 'Prevista' as const, candidates: tiedCandidates, sessionId: session.id! };
-        if (session.id) onAddElection(session.id, tiebreakerElection);
+        if (!onAddElection || tiedCandidates.length === 0) return;
+        const desc = `Votación de desempate para ${tiebreakerPositions} puesto(s). Candidatos: ${tiedCandidates.join(', ')}.`;
+        const tiebreakerElectionData = { name: `Desempate: ${election.name}`, description: desc, positionsToElect: tiebreakerPositions, status: 'Prevista' as const, candidates: tiedCandidates, sessionId: session.id! };
+        if (session.id) onAddElection(session.id, tiebreakerElectionData);
         onBack();
     };
 
@@ -1282,10 +1310,15 @@ function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElec
                     </div>
                 </div>
                 <div className="mt-4 space-y-2">
-                    {tiedCandidates.length > 0 ? (
-                        <p className="text-slate-800 font-semibold">Empate entre {tiedCandidates.join(', ')} con {getVoteText(maxVotes)}.</p>
-                    ) : winners.length > 0 ? (
-                        <p className="text-slate-800"><span className="font-semibold">Elegido(s):</span> {winners.map(([name]) => name).join(', ')} con {getVoteText(maxVotes)}.</p>
+                    {electedEntries.length > 0 || tiedCandidates.length > 0 ? (
+                      <>
+                        {electedEntries.length > 0 && (
+                          <p className="text-slate-800"><span className="font-semibold">Los primeros {election.positionsToElect}:</span> {electedText}{tiedCandidates.length === 0 ? '.' : ''}</p>
+                        )}
+                        {tiedCandidates.length > 0 && (
+                          <p className="text-slate-800 font-semibold">Empate para los {tiebreakerPositions} puesto(s) restantes entre {tiedCandidates.join(', ')} con {getVoteText(tiedVoteCount)}.</p>
+                        )}
+                      </>
                     ) : (
                         <p className="text-slate-500">Sin votos emitidos.</p>
                     )}
