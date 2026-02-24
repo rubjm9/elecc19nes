@@ -911,12 +911,13 @@ export default function App() {
       {/* H1 integrado en el contenido principal */}
       <h1 
         onClick={() => setPage('home')} 
-        className="text-5xl tracking-wider text-cyan-600 cursor-pointer hover:text-cyan-700 transition-colors mb-6" 
+        className="text-3xl md:text-4xl tracking-wider text-cyan-600 cursor-pointer hover:text-cyan-700 transition-colors mb-1 text-center max-w-lg" 
         style={{fontWeight: 900}}
         title="Haz clic para volver a la portada"
       >
-        ELECC19NES
+        65 Convención Nacional de los Bahá'ís de España
       </h1>
+      <p className="text-slate-600 text-lg mb-6 text-center">Elección de oficiales de la mesa</p>
       
       {/* Contenido de la página */}
       <div className="w-full max-w-md">
