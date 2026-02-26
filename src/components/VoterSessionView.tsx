@@ -2,41 +2,8 @@ import React, { useMemo } from 'react';
 import type { VoterSessionViewProps } from '../types';
 import { useRealtimeSession, useRealtimeVotes } from '../hooks/useRealtimeData';
 import { getElectionsOrdered } from '../utils';
+import { NavigationButton } from './ui';
 import type { Session, Election } from '../types';
-
-// Iconos simples
-const ArrowLeftIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>;
-
-// Componente de navegación simple
-const NavigationButton = ({ 
-  onClick, 
-  children, 
-  variant = "back", 
-  className = "", 
-  disabled = false 
-}: { 
-  onClick: () => void, 
-  children: React.ReactNode, 
-  variant?: "back" | "exit", 
-  className?: string, 
-  disabled?: boolean 
-}) => {
-  const baseClasses = "flex items-center gap-2 font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
-  const variantClasses = variant === "back" 
-    ? "text-cyan-600 hover:text-cyan-700" 
-    : "text-slate-500 hover:text-cyan-600";
-  
-  return (
-    <button 
-      onClick={onClick} 
-      disabled={disabled}
-      className={`${baseClasses} ${variantClasses} ${className}`}
-    >
-      {variant === "back" ? <ArrowLeftIcon /> : null}
-      {children}
-    </button>
-  );
-};
 
 export const VoterSessionView: React.FC<VoterSessionViewProps> = ({
   session: initialSession,
@@ -142,7 +109,7 @@ export const VoterSessionView: React.FC<VoterSessionViewProps> = ({
                     {election.status === 'Abierta' && election.id && (
                       <button 
                         onClick={() => onVoteClick(election.id!)} 
-                        className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-1 px-3 rounded-lg text-sm"
+                        className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold min-h-[44px] py-2 px-4 rounded-lg text-sm"
                       >
                         {hasVoted ? 'Modificar' : 'Votar'}
                       </button>
@@ -150,7 +117,7 @@ export const VoterSessionView: React.FC<VoterSessionViewProps> = ({
                     {election.status === 'Cerrada' && election.id && onViewResults && (
                       <button 
                         onClick={() => onViewResults(election.id!)} 
-                        className="bg-slate-500 hover:bg-slate-600 text-white font-bold py-1 px-3 rounded-lg text-sm"
+                        className="bg-slate-500 hover:bg-slate-600 text-white font-bold min-h-[44px] py-2 px-4 rounded-lg text-sm"
                       >
                         Ver resultados
                       </button>

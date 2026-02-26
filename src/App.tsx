@@ -3,7 +3,7 @@ import { FirestoreService } from './firebase/firestoreService';
 import { useRealtimeVotes, useRealtimeSession, useRealtimeSessions } from './hooks/useRealtimeData';
 import { getElectionsOrdered } from './utils';
 import { VoterSessionView } from './components/VoterSessionView';
-import { ConfirmDeleteModal } from './components/ui';
+import { ConfirmDeleteModal, Modal, NavigationButton } from './components/ui';
 import type { 
   FirestoreAdmin, 
   FirestoreMember, 
@@ -12,7 +12,6 @@ import type {
 } from './firebase/firestoreService';
 
 // --- Iconos SVG ---
-const ArrowLeftIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>;
 const UserIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>;
 const LockIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>;
 const PlusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
@@ -21,7 +20,8 @@ const XCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" hei
 const UsersIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>;
 
 const DownloadIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>;
-const XIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 6-12 12"></path><path d="m6 6 12 12"></path></svg>;
+const TrashIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>;
+const DoorIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>;
 const ClockIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>;
 
 // --- Tipos TypeScript (usando tipos de Firestore) ---
@@ -44,13 +44,6 @@ interface User {
   pass: string;
   role: 'manager' | 'superadmin';
   name: string;
-}
-
-interface ModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  title: string;
-  children: React.ReactNode;
 }
 
 interface HomePageProps {
@@ -140,22 +133,6 @@ const initialDb: Database = {
   sessions: {},
   votes: {}
 };
-
-// --- Componente de Modal Genérico ---
-function Modal({ isOpen, onClose, title, children }: ModalProps) { 
-  if (!isOpen) return null; 
-  return ( 
-    <div className="fixed inset-0 bg-black/50 z-50 flex justify-center items-center p-4" onClick={onClose}> 
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6" onClick={(e: React.MouseEvent) => e.stopPropagation()}> 
-        <div className="flex justify-between items-center border-b border-slate-200 pb-3 mb-4"> 
-          <h3 className="text-xl font-bold text-slate-800">{title}</h3> 
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-800 text-3xl leading-none">&times;</button> 
-        </div> 
-        <div>{children}</div> 
-      </div> 
-    </div> 
-  ); 
-}
 
 // --- Componente Principal: App ---
 export default function App() {
@@ -905,22 +882,28 @@ export default function App() {
       background-size: 200% 200%;
       animation: gradientShift 12s ease-in-out infinite;
     }
-  `}</style> <div className="min-h-screen animated-gradient flex flex-col font-sans" style={{ fontFamily: "'DM Sans', sans-serif" }}> 
+    @media (prefers-reduced-motion: reduce) {
+      .animated-gradient {
+        animation: none;
+      }
+    }
+  `}</style> <div className="min-h-screen min-[height:100dvh] animated-gradient flex flex-col font-sans pb-[env(safe-area-inset-bottom)]" style={{ fontFamily: "'DM Sans', sans-serif" }}> 
     {/* Contenido principal centrado con H1 integrado */}
     <div className="flex-1 flex flex-col items-center justify-center p-4">
       {/* H1 integrado en el contenido principal */}
       <h1 
         onClick={() => setPage('home')} 
-        className="text-3xl md:text-4xl tracking-wider text-cyan-600 cursor-pointer hover:text-cyan-700 transition-colors mb-1 text-center max-w-lg" 
+        className="text-3xl md:text-4xl tracking-wider text-cyan-600 cursor-pointer hover:text-cyan-700 transition-colors mb-1 text-center max-w-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 rounded" 
         style={{fontWeight: 900}}
         title="Haz clic para volver a la portada"
+        aria-label="Volver a la portada"
       >
         65 Convención Nacional de los Bahá'ís de España
       </h1>
       <p className="text-slate-600 text-lg mb-6 text-center">Elección de oficiales de la mesa</p>
       
-      {/* Contenido de la página */}
-      <div className="w-full max-w-md">
+      {/* Contenido de la página: más ancho en desktop para vistas de administración */}
+      <div className={`w-full max-w-md ${page === 'sessionManagement' ? 'md:max-w-5xl' : ['adminDashboard', 'superAdminPanel'].includes(page) ? 'md:max-w-2xl' : ''}`}>
         {renderPage()}
       </div>
     </div>
@@ -942,13 +925,13 @@ function HomePage({ onLogin, onAdminClick, error, loading = false }: HomePagePro
             value={key} 
             onChange={(e) => setKey(e.target.value.toUpperCase())} 
             maxLength={5} 
-            className="bg-slate-50 border-2 border-slate-300 rounded-lg text-center text-2xl p-4 tracking-[0.5em] uppercase focus:outline-none focus:border-cyan-500" 
+            className="bg-slate-50 border-2 border-slate-300 rounded-lg text-center text-2xl p-4 tracking-[0.5em] uppercase focus:outline-none focus:border-cyan-500 focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" 
             placeholder="_ _ _ _ _"
             disabled={loading}
           /> 
           <button 
             type="submit" 
-            className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            className="bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105 motion-reduce:transform-none shadow-md disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2"
             disabled={loading}
           >
             {loading ? (
@@ -961,11 +944,11 @@ function HomePage({ onLogin, onAdminClick, error, loading = false }: HomePagePro
             )}
           </button> 
         </form> 
-        {error && <div className="bg-red-50 border border-red-200 rounded-lg p-3"><p className="text-red-600 text-sm text-center">{error}</p></div>} 
+        {error && <div role="alert" className="bg-red-50 border border-red-200 rounded-lg p-3"><p className="text-red-600 text-sm text-center">{error}</p></div>} 
         <div className="mt-12">
-          <a href="#" onClick={(e) => { e.preventDefault(); if (!loading) onAdminClick(); }} className="text-slate-500 hover:text-cyan-600 text-sm">
+          <button type="button" onClick={() => !loading && onAdminClick()} className="text-slate-500 hover:text-cyan-600 text-sm bg-transparent border-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 rounded">
             Acceso administrador
-          </a>
+          </button>
         </div> 
       </div> 
     </div>
@@ -999,7 +982,7 @@ function AdminLogin({ onLogin, onBack, error, loading = false }: AdminLoginProps
             type="text" 
             value={username} 
             onChange={(e) => setUsername(e.target.value)} 
-            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 pl-12 focus:outline-none focus:border-cyan-500" 
+            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 pl-12 focus:outline-none focus:border-cyan-500 focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" 
             placeholder="Usuario"
             disabled={loading}
           />
@@ -1010,14 +993,14 @@ function AdminLogin({ onLogin, onBack, error, loading = false }: AdminLoginProps
             type="password" 
             value={password} 
             onChange={(e) => setPassword(e.target.value)} 
-            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 pl-12 focus:outline-none focus:border-cyan-500" 
+            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 pl-12 focus:outline-none focus:border-cyan-500 focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" 
             placeholder="Contraseña"
             disabled={loading}
           />
         </div> 
         <button 
           type="submit" 
-          className="mt-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+          className="mt-2 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-105 motion-reduce:transform-none shadow-md disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2"
           disabled={loading}
         >
           {loading ? (
@@ -1030,10 +1013,12 @@ function AdminLogin({ onLogin, onBack, error, loading = false }: AdminLoginProps
           )}
         </button> 
       </form> 
-      {error && <p className="text-red-500 mt-4 text-center">{error}</p>} 
-      <div className="text-xs text-slate-400 mt-4 text-center">
-        <p>Users: admin (pass: 1234), superadmin (pass: super)</p>
-      </div> 
+      {error && <div role="alert"><p className="text-red-500 mt-4 text-center">{error}</p></div>} 
+      {import.meta.env.DEV && (
+        <div className="text-xs text-slate-400 mt-4 text-center">
+          <p>Users: admin (pass: 1234), superadmin (pass: super)</p>
+        </div>
+      )} 
     </div> 
   );
 }
@@ -1044,7 +1029,8 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
     const [membersList, setMembersList] = useState<string>('');
     const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
     const handleCreate = (e: React.FormEvent) => { e.preventDefault(); onCreateSession(sessionName, membersList); setShowCreate(false); setSessionName(''); setMembersList(''); };
-    const userSessions = (user.role === 'superadmin' ? Object.values(db.sessions) : Object.values(db.sessions).filter((s: Session) => s.createdBy === user.username));
+    const userSessions = (user.role === 'superadmin' ? Object.values(db.sessions) : Object.values(db.sessions).filter((s: Session) => s.createdBy === user.username))
+        .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
     
     return ( <>
         <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Nueva sesión">
@@ -1063,7 +1049,7 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
             message={`¿Eliminar la sesión "${deleteTarget.name}"? Esta acción no se puede deshacer.`}
           />
         )}
-        <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> 
+        <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full"> 
             <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-cyan-700">Panel de administración</h2><NavigationButton onClick={onLogout} variant="exit">Cerrar sesión</NavigationButton></div> 
             <p className="text-slate-500 mb-6 -mt-4"><strong>¡Bienvenido, {user.name}!</strong> Para crear elecciones primero debes crear una sesión de votaciones, en la cual podrás añadir votantes y elecciones.</p> 
             <div className="flex flex-col sm:flex-row gap-4 mb-6">
@@ -1071,12 +1057,12 @@ function AdminDashboard({ user, db, onManageSession, onCreateSession, onManageAd
                 {user.role === 'superadmin' && <button onClick={onManageAdmins} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-700 hover:to-slate-800 text-white font-bold py-3 rounded-lg shadow-md"><UsersIcon /> Gestionar admins</button>}
             </div>
             <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Sesiones de votación</h3> 
-            <div className="space-y-4 max-h-96 overflow-y-auto"> {userSessions.length > 0 ? userSessions.map(session => ( <div key={session.id} className="bg-slate-50 border border-slate-200 p-4 pr-9 rounded-lg relative"> {onDeleteSession && session.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: session.id!, name: session.name }); }} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar sesión"><XIcon /></button>} <div className="flex justify-between items-start"> <div><h4 className="font-bold text-slate-800">{session.name}</h4><p className="text-sm text-slate-500">{session.members.length} miembros</p></div> <button onClick={() => session.id && onManageSession(session.id)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-lg text-sm">Gestionar</button> </div> </div> )) : <p className="text-slate-500 text-center py-4">No has creado ninguna sesión.</p>} </div> 
+            <div className="space-y-4 max-h-96 scroll-list"> {userSessions.length > 0 ? userSessions.map(session => ( <div key={session.id} className="bg-slate-50 border border-slate-200 p-4 pr-9 rounded-lg relative"> {onDeleteSession && session.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: session.id!, name: session.name }); }} className="absolute top-2 right-2 min-w-[44px] min-h-[44px] p-2 flex items-center justify-center rounded-lg text-red-600 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" aria-label="Eliminar sesión" title="Eliminar"><TrashIcon /></button>} <div className="flex justify-between items-start"> <div><h4 className="font-bold text-slate-800">{session.name}</h4><p className="text-sm text-slate-500">{session.members.length} miembros</p></div> <button onClick={() => session.id && onManageSession(session.id)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-lg text-sm">Gestionar</button> </div> </div> )) : <p className="text-slate-500 text-center py-4">No has creado ninguna sesión.</p>} </div> 
         </div>
     </> );
 }
 
-function SessionManagement({ session: initialSession, votes: initialVotes, onAccredit, onUnaccredit, onToggleEligibility: _onToggleEligibility, onChangeElectionStatus, onAddElection, onAddMembers, onBack, onViewResults, onReorderElections, isXlsxLoaded, user, onDeleteMember, onDeleteElection }: SessionManagementProps) {
+function SessionManagement({ session: initialSession, votes: initialVotes, onAccredit, onUnaccredit, onToggleEligibility: _onToggleEligibility, onChangeElectionStatus, onAddElection, onAddMembers, onBack, onViewResults: _onViewResults, onReorderElections, isXlsxLoaded, user, onDeleteMember, onDeleteElection }: SessionManagementProps) {
     // Usar suscripciones en tiempo real
     const { session: realtimeSession, members, elections, loading: _sessionLoading } = useRealtimeSession(initialSession?.id || null);
     const { votes: realtimeVotes, loading: _votesLoading } = useRealtimeVotes(initialSession?.id || null);
@@ -1105,9 +1091,12 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
     const [newMembersList, setNewMembersList] = useState<string>('');
     const [isCloseModalOpen, setCloseModalOpen] = useState<boolean>(false);
     const [electionToManage, setElectionToManage] = useState<Election | null>(null);
-    const [isProgressModalOpen, setProgressModalOpen] = useState<boolean>(false);
+    const [electionDetail, setElectionDetail] = useState<{ election: Election; view: 'progress' | 'results' } | null>(null);
+    const [panelClosing, setPanelClosing] = useState<boolean>(false);
+    const [panelAnimated, setPanelAnimated] = useState<boolean>(false);
     const [draggedElectionId, setDraggedElectionId] = useState<string | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<{ type: 'member' | 'election'; id: string; name: string } | null>(null);
+    const [showAddMembersModal, setShowAddMembersModal] = useState<boolean>(false);
 
     const electionsList = useMemo(() => getElectionsOrdered(session?.elections || {}, session?.electionOrder), [session?.elections, session?.electionOrder]);
     const handleDragStart = (electionId: string) => setDraggedElectionId(electionId);
@@ -1127,9 +1116,34 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
     };
     const handleDragEnd = () => setDraggedElectionId(null);
 
+    const closeDetailPanel = () => {
+      setPanelClosing(true);
+    };
+
+    useEffect(() => {
+      if (!electionDetail) {
+        setPanelAnimated(false);
+        setPanelClosing(false);
+        return;
+      }
+      const t = requestAnimationFrame(() => {
+        requestAnimationFrame(() => setPanelAnimated(true));
+      });
+      return () => cancelAnimationFrame(t);
+    }, [electionDetail]);
+
+    useEffect(() => {
+      if (!panelClosing) return;
+      const id = setTimeout(() => {
+        setElectionDetail(null);
+        setPanelClosing(false);
+      }, 300);
+      return () => clearTimeout(id);
+    }, [panelClosing]);
+
     if (!session) {
         return (
-            <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md">
+            <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full">
                 <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>
                     <p className="text-slate-500">Cargando sesión...</p>
@@ -1139,23 +1153,42 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
     }
 
     const handleCreateElection = (e: React.FormEvent) => { e.preventDefault(); if (session.id) { onAddElection(session.id, { ...newElection, status: 'Prevista' as const, sessionId: session.id }); setShowCreateElection(false); setNewElection({ name: '', description: '', positionsToElect: 1 }); } };
-    const handleAddMembers = (e: React.FormEvent) => { e.preventDefault(); onAddMembers(session.id!, newMembersList); setNewMembersList(''); };
+    const handleAddMembers = (e: React.FormEvent) => { e.preventDefault(); onAddMembers(session.id!, newMembersList); setNewMembersList(''); setShowAddMembersModal(false); };
     const filteredMembers = session.members
         .filter((m: Member) => m.name.toLowerCase().includes(filter.toLowerCase()))
         .sort((a: Member, b: Member) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
     
     const downloadMemberList = () => { if (!isXlsxLoaded) { alert("La librería de exportación no está lista."); return; } const data = session.members.map(({ name, key, email }) => ({ Nombre: name, Clave: key, Email: email || '' })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Miembros"); XLSX.writeFile(wb, `miembros_${session.name.replace(/ /g, '_')}.xlsx`); };
     const openCloseModal = (election: Election) => { setElectionToManage(election); setCloseModalOpen(true); };
-    const openProgressModal = (election: Election) => { setElectionToManage(election); setProgressModalOpen(true); };
 
-    const TabButton = ({ tabName, label }: { tabName: string; label: string }) => ( <button onClick={() => setActiveTab(tabName)} className={`py-2 px-4 text-sm font-bold rounded-t-lg ${activeTab === tabName ? 'bg-white border-b-0 border border-slate-200' : 'bg-slate-100 border border-slate-200'}`}> {label} </button> );
+    const TabButton = ({ tabName, label }: { tabName: string; label: string }) => ( <button type="button" role="tab" id={`tab-${tabName}`} aria-selected={activeTab === tabName} tabIndex={activeTab === tabName ? 0 : -1} onClick={() => setActiveTab(tabName)} className={`py-2 px-4 text-sm font-bold rounded-t-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 ${activeTab === tabName ? 'bg-white border-b-0 border border-slate-200' : 'bg-slate-100 border border-slate-200'}`}> {label} </button> );
 
     const accreditedVoters = session.members
         .filter((m: Member) => m.status === 'Presente')
         .sort((a: Member, b: Member) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
     const allMembersSorted = [...session.members].sort((a: Member, b: Member) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
-    const votesForElection = electionToManage ? Object.values(votes).map((v: { [electionId: string]: string[] }) => v[electionToManage.id!]).filter(Boolean).length : 0;
-    const pendingVoters = accreditedVoters.length - votesForElection;
+    const electionToManageForClose = electionToManage;
+    const votesForElectionClose = electionToManageForClose ? Object.values(votes).map((v: { [electionId: string]: string[] }) => v[electionToManageForClose.id!]).filter(Boolean).length : 0;
+    const pendingVoters = accreditedVoters.length - votesForElectionClose;
+
+    const detailElection = electionDetail?.election;
+    const votesForDetailElection = detailElection?.id ? Object.values(votes).map((v: { [electionId: string]: string[] }) => v[detailElection.id!]).filter(Boolean).length : 0;
+    const resultsData = useMemo(() => {
+        if (!electionDetail || electionDetail.view !== 'results' || !session || !detailElection) return null;
+        const election = detailElection;
+        const electionVoterKeys = new Set(session.members.map((v: Member) => v.key));
+        const electionVotes = Object.entries(votes).filter(([key]) => electionVoterKeys.has(key)).map(([, userVotes]: [string, { [electionId: string]: string[] }]) => election.id ? userVotes[election.id] : undefined).filter(Boolean);
+        const papeletasEmitidas = electionVotes.length;
+        const totalPapeletas = session.members.filter((m: Member) => m.status === 'Presente').length;
+        const candidatesForResults = election.candidates || session.members.filter((m: Member) => m.status === 'Presente').map((m: Member) => m.name);
+        const results: { [name: string]: number } = {};
+        candidatesForResults.forEach((name: string) => { results[name] = 0; });
+        electionVotes.forEach((voteList) => { if (Array.isArray(voteList)) voteList.forEach((name: string) => { if (results.hasOwnProperty(name)) results[name]++; }); });
+        const sortedResults = Object.entries(results).sort(([, a], [, b]) => (b as number) - (a as number));
+        const maxVotes = sortedResults.length > 0 ? (sortedResults[0][1] as number) : 0;
+        const getVoteText = (count: number) => count === 1 ? '1 voto' : `${count} votos`;
+        return { papeletasEmitidas, totalPapeletas, sortedResults, maxVotes, getVoteText };
+    }, [electionDetail, session, votes, detailElection]);
 
     return ( <>
         <Modal isOpen={isCloseModalOpen} onClose={() => setCloseModalOpen(false)} title="Confirmar cierre">
@@ -1163,17 +1196,6 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
             {pendingVoters > 0 && <p className="font-bold text-orange-600 mb-4">Atención: Todavía {pendingVoters === 1 ? 'falta 1 persona' : `faltan ${pendingVoters} personas`} por votar.</p>}
             <div className="flex justify-end gap-3 mt-4"> <button onClick={() => setCloseModalOpen(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg">Cancelar</button> <button onClick={() => { if (electionToManage) onChangeElectionStatus(session.id!, electionToManage.id!, 'Cerrada'); setCloseModalOpen(false); }} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg">Cerrar elección</button> </div>
         </Modal>
-        {electionToManage && <Modal isOpen={isProgressModalOpen} onClose={() => setProgressModalOpen(false)} title={`Progreso: ${electionToManage?.name}`}>
-            <div className="mt-2"> <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesForElection} / {accreditedVoters.length}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: `${accreditedVoters.length > 0 ? (votesForElection / accreditedVoters.length) * 100 : 0}%` }}></div></div> </div>
-            <h4 className="font-semibold text-slate-700 mt-4 mb-2">Estado de votantes</h4>
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
-                {allMembersSorted.map((member: Member) => {
-                    const isPresent = member.status === 'Presente';
-                    const hasVoted = votes[member.key] && electionToManage?.id && votes[member.key][electionToManage.id];
-                    return ( <div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between"> <p>{member.name}</p> {hasVoted ? <span className="flex items-center gap-2 text-sm text-green-600"><CheckCircleIcon /> Votó</span> : isPresent ? <span className="flex items-center gap-2 text-sm text-orange-600"><ClockIcon /> Pendiente</span> : <span className="flex items-center gap-2 text-sm text-red-600"><XCircleIcon /> No presente</span>} </div>)
-                })}
-            </div>
-        </Modal>}
         {deleteTarget && (user?.role === 'superadmin') && (
           <ConfirmDeleteModal
             isOpen={!!deleteTarget}
@@ -1188,21 +1210,192 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
             message={`¿Eliminar ${deleteTarget.type === 'member' ? 'al elector' : 'la elección'} "${deleteTarget.name}"? Esta acción no se puede deshacer.`}
           />
         )}
-        <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md">
+        <Modal isOpen={showAddMembersModal} onClose={() => setShowAddMembersModal(false)} title="Añadir nuevos electores">
+            <form onSubmit={handleAddMembers} className="space-y-4">
+                <textarea value={newMembersList} onChange={e => setNewMembersList(e.target.value)} rows={6} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" placeholder="Nombre, email@opcional.com - Una persona por línea"></textarea>
+                <div className="flex justify-end gap-3">
+                    <button type="button" onClick={() => setShowAddMembersModal(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg">Cancelar</button>
+                    <button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Añadir</button>
+                </div>
+            </form>
+        </Modal>
+        <Modal isOpen={showCreateElection} onClose={() => setShowCreateElection(false)} title="Crear nueva elección">
+            <form onSubmit={handleCreateElection} className="space-y-4">
+                <input type="text" placeholder="Nombre de la elección" value={newElection.name} onChange={e => setNewElection({...newElection, name: e.target.value})} className="w-full bg-slate-50 border p-2 rounded-lg" required/>
+                <textarea placeholder="Descripción / Instrucciones" value={newElection.description} onChange={e => setNewElection({...newElection, description: e.target.value})} className="w-full bg-slate-50 border p-2 rounded-lg" rows={3}></textarea>
+                <input type="number" placeholder="Puestos a elegir" value={newElection.positionsToElect} onChange={e => setNewElection({...newElection, positionsToElect: parseInt(e.target.value)})} className="w-full bg-slate-50 border p-2 rounded-lg" min="1" required/>
+                <div className="flex justify-end gap-3"><button type="button" onClick={() => setShowCreateElection(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg">Cancelar</button><button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Crear</button></div>
+            </form>
+        </Modal>
+        <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full">
             <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton>
             <h2 className="text-2xl font-bold text-cyan-700 mb-4">{session.name}</h2>
-            <div className="border-b border-slate-200 mb-4 flex gap-2"> <TabButton tabName="acreditacion" label="Acreditación" /> <TabButton tabName="elecciones" label="Elecciones" /> </div>
-            {activeTab === 'acreditacion' && ( <div> <input type="text" placeholder="Buscar miembro..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-4"/> <div className="space-y-2 max-h-64 overflow-y-auto pr-2 mb-4"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 pr-8 rounded-lg flex items-center justify-between relative"> {user?.role === 'superadmin' && onDeleteMember && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'member', id: member.id!, name: member.name }); }} className="absolute top-1 right-1 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar elector"><XIcon /></button>} <div><p className="font-semibold">{member.name}</p><p className={`text-sm ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status === 'Invitado' ? 'Ausente' : member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Acreditar</button> : <div className="flex items-center gap-2"><span className="font-mono bg-slate-200 px-2 py-1 rounded text-sm">{member.key}</span><button type="button" onClick={() => session.id && member.id && onUnaccredit(session.id, member.id)} className="p-1.5 rounded text-red-600 hover:bg-red-100 hover:text-red-700" title="Desacreditar" aria-label="Desacreditar"><XIcon /></button></div>} </div> ))} </div> <div className="border-t border-slate-200 pt-4"> <h4 className="font-semibold text-slate-700 mb-2">Añadir nuevos miembros</h4> <form onSubmit={handleAddMembers} className="space-y-2"> <textarea value={newMembersList} onChange={e => setNewMembersList(e.target.value)} rows={3} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg" placeholder="Nombre, email@opcional.com - Solo una persona por línea"></textarea> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg">Añadir</button> </form> </div> <button onClick={downloadMemberList} disabled={!isXlsxLoaded} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg shadow disabled:opacity-50"><DownloadIcon /> Descargar lista</button> </div> )}
-            {activeTab === 'elecciones' && ( <div> <div className="space-y-3"> {electionsList.map(election => {
-                const totalPapeletas = session.members.filter(m => m.status === 'Presente').length;
-                const votesCount = Object.values(votes).map(v => election.id ? v[election.id] : undefined).filter(Boolean).length;
-                const progress = totalPapeletas > 0 ? (votesCount / totalPapeletas) * 100 : 0;
-                const isDragging = draggedElectionId === election.id;
-                return (
-                <div key={election.id} draggable={!!onReorderElections} onDragStart={() => onReorderElections && election.id && handleDragStart(election.id)} onDragOver={handleDragOver} onDrop={(e) => election.id && handleDrop(e, election.id)} onDragEnd={handleDragEnd} className={`bg-slate-100 p-3 pr-9 rounded-lg relative ${onReorderElections ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-50' : ''}`}> {user?.role === 'superadmin' && onDeleteElection && election.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'election', id: election.id!, name: election.name }); }} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar elección"><XIcon /></button>} <p className="font-bold">{election.name}</p>
-                 {election.status === 'Abierta' && <div className="mt-2"> <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesCount} / {totalPapeletas}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: `${progress}%` }}></div></div> </div>}
-                 <div className="flex justify-between items-center mt-2"> <span className={`text-xs font-semibold px-2 py-1 rounded-full ${ election.status === 'Abierta' ? 'bg-green-100 text-green-800' : election.status === 'Cerrada' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' }`}>{election.status}</span> <div className="flex gap-2"> {election.status === 'Prevista' && <button onClick={() => session.id && election.id && onChangeElectionStatus(session.id, election.id, 'Abierta')} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Abrir</button>} {election.status === 'Abierta' && <button onClick={() => openProgressModal(election)} className="bg-slate-500 hover:bg-slate-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Gestionar</button>} {election.status === 'Abierta' && <button onClick={() => openCloseModal(election)} className="bg-red-500 hover:bg-red-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Cerrar</button>} {election.status === 'Cerrada' && election.id && <button onClick={() => onViewResults(election.id!)} className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold py-1 px-3 rounded-lg">Resultados</button>} </div> </div> </div>
-            )})} </div> <button onClick={() => setShowCreateElection(true)} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 rounded-lg"><PlusIcon /> Añadir elección</button> <Modal isOpen={showCreateElection} onClose={() => setShowCreateElection(false)} title="Crear nueva elección"> <form onSubmit={handleCreateElection} className="space-y-4"> <input type="text" placeholder="Nombre de la elección" value={newElection.name} onChange={e => setNewElection({...newElection, name: e.target.value})} className="w-full bg-slate-50 border p-2 rounded-lg" required/> <textarea placeholder="Descripción / Instrucciones" value={newElection.description} onChange={e => setNewElection({...newElection, description: e.target.value})} className="w-full bg-slate-50 border p-2 rounded-lg" rows={3}></textarea> <input type="number" placeholder="Puestos a elegir" value={newElection.positionsToElect} onChange={e => setNewElection({...newElection, positionsToElect: parseInt(e.target.value)})} className="w-full bg-slate-50 border p-2 rounded-lg" min="1" required/> <div className="flex justify-end gap-3"><button type="button" onClick={() => setShowCreateElection(false)} className="bg-slate-200 hover:bg-slate-300 font-bold py-2 px-4 rounded-lg">Cancelar</button><button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Crear</button></div> </form> </Modal> </div> )}
+            <div role="tablist" className={`border-b border-slate-200 mb-4 flex gap-2 md:hidden ${electionDetail ? 'hidden' : ''}`} aria-label="Secciones de gestión"> <TabButton tabName="acreditacion" label="Acreditación" /> <TabButton tabName="elecciones" label="Elecciones" /> </div>
+
+            {/* Móvil: con panel abierto solo se muestra el contenido del panel */}
+            {electionDetail && (
+              <div className={`md:hidden mt-4 transition-all duration-300 ease-out motion-reduce:duration-0 ${panelClosing ? 'opacity-0 translate-x-4' : panelAnimated ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'}`}>
+                <button type="button" onClick={closeDetailPanel} className="flex items-center gap-2 font-bold text-cyan-600 hover:text-cyan-700 mb-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 rounded">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6" /></svg>
+                  Volver
+                </button>
+                {electionDetail.view === 'progress' && detailElection && (
+                  <>
+                    <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Progreso: {detailElection.name}</h3>
+                    <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesForDetailElection} / {accreditedVoters.length}</span></div>
+                    <div className="w-full bg-slate-200 rounded-full h-2.5 mb-4"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: `${accreditedVoters.length > 0 ? (votesForDetailElection / accreditedVoters.length) * 100 : 0}%` }} /></div>
+                    <h4 className="font-semibold text-slate-700 mt-4 mb-2">Estado de votantes</h4>
+                    <div className="space-y-2 max-h-96 scroll-list pr-2">
+                      {allMembersSorted.map((member: Member) => {
+                        const isPresent = member.status === 'Presente';
+                        const hasVoted = votes[member.key] && detailElection?.id && votes[member.key][detailElection.id];
+                        return (<div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between"><p>{member.name}</p> {hasVoted ? <span className="flex items-center gap-2 text-sm text-green-600"><CheckCircleIcon /> Votó</span> : isPresent ? <span className="flex items-center gap-2 text-sm text-orange-600"><ClockIcon /> Pendiente</span> : <span className="flex items-center gap-2 text-sm text-red-600"><XCircleIcon /> No presente</span>} </div>);
+                      })}
+                    </div>
+                  </>
+                )}
+                {electionDetail.view === 'results' && detailElection && resultsData && (
+                  <>
+                    <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Resultados: {detailElection.name}</h3>
+                    <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4">
+                      <div className="flex-1">
+                        <div className="text-2xl font-bold text-slate-700">{resultsData.papeletasEmitidas}<span className="text-lg text-slate-400">/{resultsData.totalPapeletas}</span></div>
+                        <div className="text-sm text-slate-500">Papeletas emitidas</div>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      {resultsData.sortedResults.map(([name, count], index) => (
+                        <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                          <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{resultsData.getVoteText(count)}</span></div>
+                          <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: resultsData.maxVotes > 0 ? `${(count / resultsData.maxVotes) * 100}%` : '0%' }} /></div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Móvil: contenido de pestañas Acreditación / Elecciones cuando no hay panel abierto */}
+            {!electionDetail && (
+              <div className="md:hidden mt-4">
+                <div role="tabpanel" id="panel-acreditacion" aria-labelledby="tab-acreditacion" className={`${activeTab === 'acreditacion' ? 'block' : 'hidden'} flex flex-col min-h-0`}>
+                  <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Acreditación</h3>
+                  <input type="text" placeholder="Buscar miembro..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-4"/>
+                  <div className="space-y-2 flex-1 min-h-[12rem] max-h-96 scroll-list pr-2 mb-4"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 pr-8 rounded-lg flex items-center justify-between relative"> {user?.role === 'superadmin' && onDeleteMember && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'member', id: member.id!, name: member.name }); }} className="absolute top-2 right-2 min-w-[44px] min-h-[44px] p-2 flex items-center justify-center rounded-lg text-red-600 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" aria-label="Eliminar elector" title="Eliminar"><TrashIcon /></button>} <div><p className="font-semibold">{member.name}</p><p className={`text-sm ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status === 'Invitado' ? 'Ausente' : member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold min-h-[44px] py-2 px-4 rounded-lg">Acreditar</button> : <div className="flex items-center gap-2"><span className="font-mono bg-slate-200 px-2 py-1 rounded text-sm">{member.key}</span><button type="button" onClick={() => session.id && member.id && onUnaccredit(session.id, member.id)} className="min-w-[44px] min-h-[44px] p-2 flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" title="Desacreditar" aria-label="Desacreditar"><DoorIcon /></button></div>} </div> ))} </div>
+                  <div className="flex justify-between items-center gap-4 flex-shrink-0">
+                    <button type="button" onClick={() => setShowAddMembersModal(true)} className="flex items-center justify-center gap-2 bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg shadow"><PlusIcon /> Añadir</button>
+                    <button type="button" onClick={downloadMemberList} disabled={!isXlsxLoaded} className="flex items-center justify-center gap-2 bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg shadow disabled:opacity-50"><DownloadIcon /> Descargar lista</button>
+                  </div>
+                </div>
+                <div role="tabpanel" id="panel-elecciones" aria-labelledby="tab-elecciones" className={activeTab === 'elecciones' ? 'block' : 'hidden'}>
+                  <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Elecciones</h3>
+                  <div className="space-y-3"> {electionsList.map(election => {
+                    const totalPapeletas = session.members.filter(m => m.status === 'Presente').length;
+                    const votesCount = Object.values(votes).map(v => election.id ? v[election.id] : undefined).filter(Boolean).length;
+                    const progress = totalPapeletas > 0 ? (votesCount / totalPapeletas) * 100 : 0;
+                    const isDragging = draggedElectionId === election.id;
+                    const isSelected = electionDetail?.election?.id === election.id;
+                    return (
+                    <div key={election.id} draggable={!!onReorderElections} onDragStart={() => onReorderElections && election.id && handleDragStart(election.id)} onDragOver={handleDragOver} onDrop={(e) => election.id && handleDrop(e, election.id)} onDragEnd={handleDragEnd} className={`p-3 pr-9 rounded-lg relative transition-colors duration-300 ease-out motion-reduce:duration-0 ${isSelected ? 'bg-cyan-50' : 'bg-slate-100'} ${onReorderElections ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-50' : ''}`}> {user?.role === 'superadmin' && onDeleteElection && election.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'election', id: election.id!, name: election.name }); }} className="absolute top-2 right-2 min-w-[44px] min-h-[44px] p-2 flex items-center justify-center rounded-lg text-red-600 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" aria-label="Eliminar elección" title="Eliminar"><TrashIcon /></button>} <p className="font-bold">{election.name}</p>
+                     {election.status === 'Abierta' && <div className="mt-2"> <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesCount} / {totalPapeletas}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: `${progress}%` }} /></div> </div>}
+                     <div className="flex justify-between items-center mt-2"> <span className={`text-xs font-semibold px-2 py-1 rounded-full ${ election.status === 'Abierta' ? 'bg-green-100 text-green-800' : election.status === 'Cerrada' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' }`}>{election.status}</span> <div className="flex gap-2"> {election.status === 'Prevista' && <button onClick={() => session.id && election.id && onChangeElectionStatus(session.id, election.id, 'Abierta')} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold min-h-[44px] py-2 px-4 rounded-lg">Abrir</button>} {election.status === 'Abierta' && <button onClick={() => setElectionDetail({ election, view: 'progress' })} className="bg-slate-500 hover:bg-slate-600 text-white text-sm font-bold min-h-[44px] py-2 px-4 rounded-lg">Gestionar</button>} {election.status === 'Abierta' && <button onClick={() => openCloseModal(election)} className="bg-red-500 hover:bg-red-600 text-white text-sm font-bold min-h-[44px] py-2 px-4 rounded-lg">Cerrar</button>} {election.status === 'Cerrada' && election.id && <button onClick={() => setElectionDetail({ election, view: 'results' })} className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold min-h-[44px] py-2 px-4 rounded-lg">Resultados</button>} </div> </div> </div>
+                    );})} </div>
+                  <button onClick={() => setShowCreateElection(true)} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 rounded-lg"><PlusIcon /> Añadir elección</button>
+                </div>
+              </div>
+            )}
+
+            {/* Desktop: una sola grid con 3 columnas; la tercera tiene ancho 0 cuando el panel está cerrado. Transición anima el cambio de anchos. */}
+            <div
+              className={`hidden md:grid mt-4 md:gap-4 session-grid-columns min-w-0 ${electionDetail || panelClosing ? 'md:grid-cols-[200px_1fr_1fr]' : 'md:grid-cols-[1fr_1fr_0fr]'}`}
+            >
+              {/* Columna 1: Acreditación (ancha o 200px según panel abierto/cerrado) */}
+              <div role="tabpanel" className={`flex flex-col min-h-0 min-w-0 ${electionDetail || panelClosing ? 'overflow-hidden' : ''}`}>
+                {(electionDetail || panelClosing) ? (
+                  <>
+                    <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-2 truncate">Acreditación</h3>
+                    <input type="text" placeholder="Buscar..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-2 text-sm" />
+                    <div className="space-y-2 flex-1 min-h-0 overflow-y-auto scroll-list pr-1"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between relative shrink-0"> {user?.role === 'superadmin' && onDeleteMember && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'member', id: member.id!, name: member.name }); }} className="absolute top-1 right-1 min-w-[36px] min-h-[36px] p-1 flex items-center justify-center rounded text-red-600 hover:bg-red-100" aria-label="Eliminar" title="Eliminar"><TrashIcon /></button>} <div className="min-w-0 flex-1"><p className="font-semibold text-sm truncate">{member.name}</p><p className={`text-xs ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status === 'Invitado' ? 'Ausente' : member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="shrink-0 bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-1 px-2 rounded">Acreditar</button> : <div className="flex items-center gap-1 shrink-0"><span className="font-mono bg-slate-200 px-1 py-0.5 rounded text-xs truncate max-w-[4rem]" title={member.key}>{member.key}</span><button type="button" onClick={() => session.id && member.id && onUnaccredit(session.id, member.id)} className="min-w-[36px] min-h-[36px] p-1 flex items-center justify-center rounded text-slate-600 hover:bg-slate-100" title="Desacreditar" aria-label="Desacreditar"><DoorIcon /></button></div>} </div> ))} </div>
+                    <div className="flex gap-2 flex-shrink-0 mt-2">
+                      <button type="button" onClick={() => setShowAddMembersModal(true)} className="flex-1 flex items-center justify-center gap-1 bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-1.5 px-2 rounded-lg text-sm"><PlusIcon /></button>
+                      <button type="button" onClick={downloadMemberList} disabled={!isXlsxLoaded} className="flex-1 flex items-center justify-center gap-1 bg-slate-500 hover:bg-slate-600 text-white font-bold py-1.5 px-2 rounded-lg text-sm disabled:opacity-50"><DownloadIcon /></button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4 md:mb-4">Acreditación</h3>
+                    <input type="text" placeholder="Buscar miembro..." value={filter} onChange={e => setFilter(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg mb-4"/>
+                    <div className="space-y-2 flex-1 min-h-[20rem] max-h-96 scroll-list pr-2 mb-4"> {filteredMembers.map(member => ( <div key={member.id} className="bg-slate-100 p-2 pr-8 rounded-lg flex items-center justify-between relative"> {user?.role === 'superadmin' && onDeleteMember && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'member', id: member.id!, name: member.name }); }} className="absolute top-2 right-2 min-w-[44px] min-h-[44px] p-2 flex items-center justify-center rounded-lg text-red-600 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" aria-label="Eliminar elector" title="Eliminar"><TrashIcon /></button>} <div><p className="font-semibold">{member.name}</p><p className={`text-sm ${member.status === 'Presente' ? 'text-green-600' : 'text-slate-500'}`}>{member.status === 'Invitado' ? 'Ausente' : member.status}</p></div> {member.status === 'Invitado' ? <button onClick={() => session.id && member.id && onAccredit(session.id, member.id)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold min-h-[44px] py-2 px-4 rounded-lg">Acreditar</button> : <div className="flex items-center gap-2"><span className="font-mono bg-slate-200 px-2 py-1 rounded text-sm">{member.key}</span><button type="button" onClick={() => session.id && member.id && onUnaccredit(session.id, member.id)} className="min-w-[44px] min-h-[44px] p-2 flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" title="Desacreditar" aria-label="Desacreditar"><DoorIcon /></button></div>} </div> ))} </div>
+                    <div className="flex justify-between items-center gap-4 flex-shrink-0">
+                      <button type="button" onClick={() => setShowAddMembersModal(true)} className="flex items-center justify-center gap-2 bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg shadow"><PlusIcon /> Añadir</button>
+                      <button type="button" onClick={downloadMemberList} disabled={!isXlsxLoaded} className="flex items-center justify-center gap-2 bg-slate-500 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded-lg shadow disabled:opacity-50"><DownloadIcon /> Descargar lista</button>
+                    </div>
+                  </>
+                )}
+              </div>
+              {/* Columna 2: Elecciones */}
+              <div role="tabpanel" id="panel-elecciones" aria-labelledby="tab-elecciones" className="min-w-0">
+                <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Elecciones</h3>
+                <div className="space-y-3"> {electionsList.map(election => {
+                  const totalPapeletas = session.members.filter(m => m.status === 'Presente').length;
+                  const votesCount = Object.values(votes).map(v => election.id ? v[election.id] : undefined).filter(Boolean).length;
+                  const progress = totalPapeletas > 0 ? (votesCount / totalPapeletas) * 100 : 0;
+                  const isDragging = draggedElectionId === election.id;
+                  const isSelected = electionDetail?.election?.id === election.id;
+                  return (
+                  <div key={election.id} draggable={!!onReorderElections} onDragStart={() => onReorderElections && election.id && handleDragStart(election.id)} onDragOver={handleDragOver} onDrop={(e) => election.id && handleDrop(e, election.id)} onDragEnd={handleDragEnd} className={`p-3 pr-9 rounded-lg relative transition-colors duration-300 ease-out motion-reduce:duration-0 ${isSelected ? 'bg-cyan-50' : 'bg-slate-100'} ${onReorderElections ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-50' : ''}`}> {user?.role === 'superadmin' && onDeleteElection && election.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'election', id: election.id!, name: election.name }); }} className="absolute top-2 right-2 min-w-[44px] min-h-[44px] p-2 flex items-center justify-center rounded-lg text-red-600 hover:bg-red-100" aria-label="Eliminar" title="Eliminar"><TrashIcon /></button>} <p className="font-bold">{election.name}</p>
+                   {election.status === 'Abierta' && <div className="mt-2"> <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesCount} / {totalPapeletas}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: `${progress}%` }} /></div> </div>}
+                   <div className="flex justify-between items-center mt-2"> <span className={`text-xs font-semibold px-2 py-1 rounded-full ${ election.status === 'Abierta' ? 'bg-green-100 text-green-800' : election.status === 'Cerrada' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800' }`}>{election.status}</span> <div className="flex gap-2"> {election.status === 'Prevista' && <button onClick={() => session.id && election.id && onChangeElectionStatus(session.id, election.id, 'Abierta')} className="bg-green-500 hover:bg-green-600 text-white text-sm font-bold min-h-[44px] py-2 px-4 rounded-lg">Abrir</button>} {election.status === 'Abierta' && <button onClick={() => setElectionDetail({ election, view: 'progress' })} className="bg-slate-500 hover:bg-slate-600 text-white text-sm font-bold min-h-[44px] py-2 px-4 rounded-lg">Gestionar</button>} {election.status === 'Abierta' && <button onClick={() => openCloseModal(election)} className="bg-red-500 hover:bg-red-600 text-white text-sm font-bold min-h-[44px] py-2 px-4 rounded-lg">Cerrar</button>} {election.status === 'Cerrada' && election.id && <button onClick={() => setElectionDetail({ election, view: 'results' })} className="bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold min-h-[44px] py-2 px-4 rounded-lg">Resultados</button>} </div> </div> </div>
+                  );})} </div>
+                <button onClick={() => setShowCreateElection(true)} className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 rounded-lg"><PlusIcon /> Añadir elección</button>
+              </div>
+              {/* Columna 3: solo reserva espacio en el grid. El contenido va en capa absoluta para no forzar layout y evitar glitch al aparecer. */}
+              <div className="relative min-w-0 overflow-hidden">
+                {(electionDetail || panelClosing) && (
+                  <div
+                    className={`absolute inset-0 z-10 flex flex-col overflow-auto border-l border-slate-200 pl-4 bg-white transition-opacity duration-300 ease-out motion-reduce:duration-0 ${panelClosing ? 'opacity-0' : panelAnimated ? 'opacity-100' : 'opacity-0'}`}
+                    aria-hidden={!panelAnimated && !panelClosing}
+                  >
+                    <button type="button" onClick={closeDetailPanel} className="self-end flex items-center gap-2 font-bold text-cyan-600 hover:text-cyan-700 mb-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 rounded"> Cerrar panel <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg> </button>
+                    {electionDetail?.view === 'progress' && detailElection && (
+                      <>
+                        <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Progreso: {detailElection.name}</h3>
+                        <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesForDetailElection} / {accreditedVoters.length}</span></div>
+                        <div className="w-full bg-slate-200 rounded-full h-2.5 mb-4"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: `${accreditedVoters.length > 0 ? (votesForDetailElection / accreditedVoters.length) * 100 : 0}%` }} /></div>
+                        <h4 className="font-semibold text-slate-700 mt-4 mb-2">Estado de votantes</h4>
+                        <div className="space-y-2 flex-1 min-h-0 overflow-y-auto scroll-list pr-2">
+                          {allMembersSorted.map((member: Member) => {
+                            const isPresent = member.status === 'Presente';
+                            const hasVoted = votes[member.key] && detailElection?.id && votes[member.key][detailElection.id];
+                            return (<div key={member.id} className="bg-slate-100 p-2 rounded-lg flex items-center justify-between"><p>{member.name}</p> {hasVoted ? <span className="flex items-center gap-2 text-sm text-green-600"><CheckCircleIcon /> Votó</span> : isPresent ? <span className="flex items-center gap-2 text-sm text-orange-600"><ClockIcon /> Pendiente</span> : <span className="flex items-center gap-2 text-sm text-red-600"><XCircleIcon /> No presente</span>} </div>);
+                          })}
+                        </div>
+                      </>
+                    )}
+                    {electionDetail?.view === 'results' && detailElection && resultsData && (
+                      <>
+                        <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Resultados: {detailElection.name}</h3>
+                        <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4">
+                          <div className="flex-1">
+                            <div className="text-2xl font-bold text-slate-700">{resultsData.papeletasEmitidas}<span className="text-lg text-slate-400">/{resultsData.totalPapeletas}</span></div>
+                            <div className="text-sm text-slate-500">Papeletas emitidas</div>
+                          </div>
+                        </div>
+                        <div className="space-y-3 overflow-y-auto scroll-list pr-2">
+                          {resultsData.sortedResults.map(([name, count], index) => (
+                            <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                              <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{resultsData.getVoteText(count)}</span></div>
+                              <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: resultsData.maxVotes > 0 ? `${(count / resultsData.maxVotes) * 100}%` : '0%' }} /></div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
         </div>
     </> );
 }
@@ -1215,18 +1408,20 @@ function BallotPage({ session, election, voterKey, previousVotes, onVote, onBack
     useEffect(() => { if (selections.length === 0) setSelections(Array(election.positionsToElect).fill('')); }, [election.positionsToElect, selections.length]);
     const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); setError(''); if (selections.some((s: string) => s === '')) { setError('Debes seleccionar un candidato para cada puesto.'); return; } const uniqueSelections = new Set(selections.filter((s: string) => s !== '')); if (uniqueSelections.size !== selections.filter((s: string) => s !== '').length) { setError('No puedes votar por la misma persona más de una vez.'); return; } if (session.id && election.id) onVote(voterKey, session.id, election.id, selections); };
     const candidates = election.candidates ? session.members.filter((m: Member) => election.candidates!.includes(m.name)) : session.members.filter((m: Member) => m.status === 'Presente' && m.isEligible);
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a la sesión</NavigationButton> <h2 className="text-2xl font-bold mb-2 text-cyan-700">{election.name}</h2> <p className="text-slate-500 mb-4 italic">{election.description}</p> {previousVotes.length > 0 && (<div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-r-lg"><p className="font-bold">Ya has votado en esta elección.</p><p className="text-sm">Puedes modificar tu voto hasta que se cierre la votación.</p></div>)} <p className="text-slate-500 mb-6">Debes elegir a {election.positionsToElect} persona(s).</p> <form onSubmit={handleSubmit} className="flex flex-col gap-4"> {[...Array(election.positionsToElect)].map((_, index) => ( <div key={index}> <label className="block text-sm font-medium text-slate-600 mb-1">Voto {index + 1}</label> <select value={selections[index] || ''} onChange={e => {const newS = [...selections]; newS[index] = e.target.value; setSelections(newS);}} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3"> <option value="" disabled>Selecciona una persona...</option> {candidates.map(c => <option key={c.id} value={c.name}>{c.name}</option>)} </select> </div> ))} {error && <p className="text-red-500 mt-4 text-center">{error}</p>} <button type="submit" className="mt-4 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg shadow-md">{previousVotes.length > 0 ? 'Modificar papeleta' : 'Emitir mi voto'}</button> </form> </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a la sesión</NavigationButton> <h2 className="text-2xl font-bold mb-2 text-cyan-700">{election.name}</h2> <p className="text-slate-500 mb-4 italic">{election.description}</p> {previousVotes.length > 0 && (<div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-r-lg"><p className="font-bold">Ya has votado en esta elección.</p><p className="text-sm">Puedes modificar tu voto hasta que se cierre la votación.</p></div>)} <p className="text-slate-500 mb-6">Debes elegir a {election.positionsToElect} persona(s).</p> <form onSubmit={handleSubmit} className="flex flex-col gap-4"> {[...Array(election.positionsToElect)].map((_, index) => ( <div key={index}> <label className="block text-sm font-medium text-slate-600 mb-1">Voto {index + 1}</label> <select value={selections[index] || ''} onChange={e => {const newS = [...selections]; newS[index] = e.target.value; setSelections(newS);}} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3"> <option value="" disabled>Selecciona una persona...</option> {candidates.map(c => <option key={c.id} value={c.name}>{c.name}</option>)} </select> </div> ))} {error && <div role="alert"><p className="text-red-500 mt-4 text-center">{error}</p></div>} <button type="submit" className="mt-4 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg shadow-md">{previousVotes.length > 0 ? 'Modificar papeleta' : 'Emitir mi voto'}</button> </form> </div> );
 }
 
 function VoteSuccessPage({ onBackToSession, onExit }: VoteSuccessPageProps) { 
   return ( 
     <div className="text-center p-8 bg-white rounded-lg shadow-xl border border-slate-200"> 
-      <div className="w-16 h-16 text-green-500 mx-auto mb-4"><CheckCircleIcon /></div> 
       <h2 className="text-2xl font-bold text-slate-800">¡Voto registrado con éxito!</h2> 
-      <p className="text-slate-500 mt-2 mb-6">Tu voto ha sido guardado.</p> 
-      <div className="flex flex-col gap-3"> 
+      <p className="text-slate-500 mt-2">Tu voto ha sido guardado.</p> 
+      <div className="flex justify-center my-6">
+        <div className="w-24 h-24 text-green-500 [&_svg]:w-full [&_svg]:h-full"><CheckCircleIcon /></div>
+      </div>
+      <div className="flex flex-col gap-3 items-center"> 
         <NavigationButton onClick={onBackToSession} variant="back" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Volver a la sesión</NavigationButton> 
-        <NavigationButton onClick={onExit} variant="exit" className="text-sm">Salir (votar como otro usuario)</NavigationButton> 
+        <NavigationButton onClick={onExit} variant="exit" className="text-sm font-normal">Salir (votar como otro usuario)</NavigationButton> 
       </div> 
     </div> 
   ); 
@@ -1300,7 +1495,7 @@ function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElec
 
     if (voterView) {
         return (
-            <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md">
+            <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full">
                 <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a la sesión</NavigationButton>
                 <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2>
                 {votesLoading && <div className="text-center py-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500 mx-auto mb-2"></div><p className="text-sm text-slate-500">Actualizando resultados...</p></div>}
@@ -1328,7 +1523,7 @@ function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElec
         );
     }
 
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a gestión</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> {votesLoading && <div className="text-center py-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500 mx-auto mb-2"></div><p className="text-sm text-slate-500">Actualizando resultados...</p></div>} <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && onAddElection && !tiebreakerElection && <div className="my-4"><button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button></div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a gestión</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-2">Resultados: {election.name}</h2> {votesLoading && <div className="text-center py-4"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-500 mx-auto mb-2"></div><p className="text-sm text-slate-500">Actualizando resultados...</p></div>} <div className="flex gap-4 text-center border-b border-slate-200 pb-4 mb-4"> <div className="flex-1"> <div className="text-2xl font-bold text-slate-700">{papeletasEmitidas}<span className="text-lg text-slate-400">/{totalPapeletas}</span></div> <div className="text-sm text-slate-500">Papeletas emitidas</div> </div> </div> {tiedCandidates.length > 0 && onAddElection && !tiebreakerElection && <div className="my-4"><button onClick={createTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button></div>} <div className="space-y-3"> {sortedResults.map(([name, count], index) => ( <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200"> <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: maxVotes > 0 ? `${(count / maxVotes) * 100}%` : '0%' }}></div></div> </div> ))} </div> </div> );
 }
 
 function SuperAdminPanel({ admins, onAddAdmin, onDeleteAdmin, onBack }: SuperAdminPanelProps) {
@@ -1338,38 +1533,8 @@ function SuperAdminPanel({ admins, onAddAdmin, onDeleteAdmin, onBack }: SuperAdm
     const [deleteTarget, setDeleteTarget] = useState<{ adminId: string; adminName: string } | null>(null);
     const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (!username || !password || !name) { alert('Por favor, completa todos los campos.'); return; } onAddAdmin(username, password, name); setUsername(''); setPassword(''); setName(''); };
     const managerAdmins = Object.entries(admins).filter(([, details]: [string, Admin]) => details.role === 'manager');
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full max-w-md"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-4">Gestionar administradores</h2> <div className="mb-6 border-t border-slate-200 pt-4"> <h3 className="text-lg font-semibold text-slate-700 mb-2">Crear nuevo administrador</h3> <form onSubmit={handleSubmit} className="space-y-3"> <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre completo" /> <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre de usuario" /> <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Contraseña" /> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg shadow">Crear administrador</button> </form> </div> <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Lista de administradores</h3> <div className="space-y-2 max-h-60 overflow-y-auto pr-2"> {managerAdmins.map(([adminId, details]) => ( <div key={adminId} className="bg-slate-100 p-3 pr-8 rounded-lg flex justify-between items-center relative"> <button type="button" onClick={() => setDeleteTarget({ adminId, adminName: details.name })} className="absolute top-2 right-2 p-1 rounded text-red-600 hover:bg-red-100" aria-label="Eliminar administrador"><XIcon /></button> <div> <p className="font-semibold text-slate-800">{details.name}</p> <p className="text-sm text-slate-500">Usuario: {details.username}</p> </div> </div> ))} </div> {deleteTarget && <ConfirmDeleteModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={() => { onDeleteAdmin(deleteTarget.adminId, deleteTarget.adminName); setDeleteTarget(null); }} title="Eliminar administrador" message={`¿Eliminar a ${deleteTarget.adminName}? Esta acción no se puede deshacer.`} />} </div> );
+    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200 w-full"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver al panel</NavigationButton> <h2 className="text-2xl font-bold text-cyan-700 mb-4">Gestionar administradores</h2> <div className="mb-6 border-t border-slate-200 pt-4"> <h3 className="text-lg font-semibold text-slate-700 mb-2">Crear nuevo administrador</h3> <form onSubmit={handleSubmit} className="space-y-3"> <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre completo" /> <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Nombre de usuario" /> <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg" placeholder="Contraseña" /> <button type="submit" className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg shadow">Crear administrador</button> </form> </div> <h3 className="text-lg font-semibold text-slate-700 border-b border-slate-200 pb-2 mb-4">Lista de administradores</h3> <div className="space-y-2 max-h-60 scroll-list pr-2"> {managerAdmins.map(([adminId, details]) => ( <div key={adminId} className="bg-slate-100 p-3 pr-8 rounded-lg flex justify-between items-center relative"> <button type="button" onClick={() => setDeleteTarget({ adminId, adminName: details.name })} className="absolute top-2 right-2 min-w-[44px] min-h-[44px] p-2 flex items-center justify-center rounded-lg text-red-600 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" aria-label="Eliminar administrador" title="Eliminar"><TrashIcon /></button> <div> <p className="font-semibold text-slate-800">{details.name}</p> <p className="text-sm text-slate-500">Usuario: {details.username}</p> </div> </div> ))} </div> {deleteTarget && <ConfirmDeleteModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={() => { onDeleteAdmin(deleteTarget.adminId, deleteTarget.adminName); setDeleteTarget(null); }} title="Eliminar administrador" message={`¿Eliminar a ${deleteTarget.adminName}? Esta acción no se puede deshacer.`} />} </div> );
 }
 
 
 
-// Componente de navegación unificado (para volver y salir)
-const NavigationButton = ({ 
-  onClick, 
-  children, 
-  variant = "back", 
-  className = "", 
-  disabled = false 
-}: { 
-  onClick: () => void, 
-  children: React.ReactNode, 
-  variant?: "back" | "exit", 
-  className?: string, 
-  disabled?: boolean 
-}) => {
-  const baseClasses = "flex items-center gap-2 font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
-  const variantClasses = variant === "back" 
-    ? "text-cyan-600 hover:text-cyan-700" 
-    : "text-slate-500 hover:text-cyan-600";
-  
-  return (
-    <button 
-      onClick={onClick} 
-      disabled={disabled}
-      className={`${baseClasses} ${variantClasses} ${className}`}
-    >
-      {variant === "back" ? <ArrowLeftIcon /> : null}
-      {children}
-    </button>
-  );
-};

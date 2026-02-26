@@ -1,4 +1,35 @@
 @import "tailwindcss";
+
+/* Scrollbar visible pero discreta en listas con overflow */
+.scroll-list {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184) transparent;
+}
+.scroll-list::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-list::-webkit-scrollbar-thumb {
+  background-color: rgb(148 163 184);
+  border-radius: 4px;
+}
+.scroll-list::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(100 116 139);
+}
+
+/* Transición suave para cambio de anchos en grid (panel sesión) */
+.session-grid-columns {
+  transition: grid-template-columns 300ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-grid-columns {
+    transition-duration: 0s;
+  }
+}
+
 /*
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
