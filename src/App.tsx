@@ -1172,6 +1172,7 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
     const pendingVoters = accreditedVoters.length - votesForElectionClose;
 
     const detailElection = electionDetail?.election;
+    const selectedElectionId = electionDetail?.election?.id ?? null;
     const votesForDetailElection = detailElection?.id ? Object.values(votes).map((v: { [electionId: string]: string[] }) => v[detailElection.id!]).filter(Boolean).length : 0;
     const resultsData = useMemo(() => {
         if (!electionDetail || electionDetail.view !== 'results' || !session || !detailElection) return null;
@@ -1295,7 +1296,7 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
                     const votesCount = Object.values(votes).map(v => election.id ? v[election.id] : undefined).filter(Boolean).length;
                     const progress = totalPapeletas > 0 ? (votesCount / totalPapeletas) * 100 : 0;
                     const isDragging = draggedElectionId === election.id;
-                    const isSelected = electionDetail?.election?.id === election.id;
+                    const isSelected = selectedElectionId === election.id;
                     return (
                     <div key={election.id} draggable={!!onReorderElections} onDragStart={() => onReorderElections && election.id && handleDragStart(election.id)} onDragOver={handleDragOver} onDrop={(e) => election.id && handleDrop(e, election.id)} onDragEnd={handleDragEnd} className={`p-3 pr-9 rounded-lg relative transition-colors duration-300 ease-out motion-reduce:duration-0 ${isSelected ? 'bg-cyan-50' : 'bg-slate-100'} ${onReorderElections ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-50' : ''}`}> {user?.role === 'superadmin' && onDeleteElection && election.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'election', id: election.id!, name: election.name }); }} className="absolute top-2 right-2 min-w-[44px] min-h-[44px] p-2 flex items-center justify-center rounded-lg text-red-600 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" aria-label="Eliminar elección" title="Eliminar"><TrashIcon /></button>} <p className="font-bold">{election.name}</p>
                      {election.status === 'Abierta' && <div className="mt-2"> <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesCount} / {totalPapeletas}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: `${progress}%` }} /></div> </div>}
@@ -1342,7 +1343,7 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
                   const votesCount = Object.values(votes).map(v => election.id ? v[election.id] : undefined).filter(Boolean).length;
                   const progress = totalPapeletas > 0 ? (votesCount / totalPapeletas) * 100 : 0;
                   const isDragging = draggedElectionId === election.id;
-                  const isSelected = electionDetail?.election?.id === election.id;
+                  const isSelected = selectedElectionId === election.id;
                   return (
                   <div key={election.id} draggable={!!onReorderElections} onDragStart={() => onReorderElections && election.id && handleDragStart(election.id)} onDragOver={handleDragOver} onDrop={(e) => election.id && handleDrop(e, election.id)} onDragEnd={handleDragEnd} className={`p-3 pr-9 rounded-lg relative transition-colors duration-300 ease-out motion-reduce:duration-0 ${isSelected ? 'bg-cyan-50' : 'bg-slate-100'} ${onReorderElections ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-50' : ''}`}> {user?.role === 'superadmin' && onDeleteElection && election.id && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'election', id: election.id!, name: election.name }); }} className="absolute top-2 right-2 min-w-[44px] min-h-[44px] p-2 flex items-center justify-center rounded-lg text-red-600 hover:bg-red-100" aria-label="Eliminar" title="Eliminar"><TrashIcon /></button>} <p className="font-bold">{election.name}</p>
                    {election.status === 'Abierta' && <div className="mt-2"> <div className="flex justify-between text-sm text-slate-500 mb-1"><span>Participación</span><span>{votesCount} / {totalPapeletas}</span></div> <div className="w-full bg-slate-200 rounded-full h-2.5"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: `${progress}%` }} /></div> </div>}
