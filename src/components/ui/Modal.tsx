@@ -15,6 +15,7 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousActiveElement = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
+  const didInitialFocusRef = useRef(false);
   onCloseRef.current = onClose;
 
   useEffect(() => {
@@ -56,9 +57,13 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }
         }
       });
     };
-    focusFirst();
+    if (!didInitialFocusRef.current) {
+      focusFirst();
+      didInitialFocusRef.current = true;
+    }
 
     return () => {
+      didInitialFocusRef.current = false;
       document.removeEventListener('keydown', handleKeyDown);
       if (previousActiveElement.current?.focus) {
         previousActiveElement.current.focus();
