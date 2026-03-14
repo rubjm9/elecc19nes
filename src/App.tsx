@@ -118,14 +118,12 @@ interface SuperAdminPanelProps {
   onBack: () => void;
 }
 
-// Declaración global para XLSX
+// Declaración global para XLSX (se usa (window as any).XLSX en downloadMemberList tras cargar el script)
 declare global {
   interface Window {
     XLSX: any;
   }
 }
-
-const XLSX = (window as any).XLSX;
 
 // --- Base de Datos Simulada (inicial vacía, se carga desde Firestore) ---
 const initialDb: Database = {
