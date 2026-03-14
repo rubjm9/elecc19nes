@@ -14,6 +14,8 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }
   const contentRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousActiveElement = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -22,7 +24,7 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
       }
       if (e.key === 'Tab' && contentRef.current) {
         const focusables = contentRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
@@ -62,7 +64,7 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }
         previousActiveElement.current.focus();
       }
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
