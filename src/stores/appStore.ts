@@ -3,6 +3,7 @@ import { FirestoreService } from '../firebase/firestoreService';
 import type { Database, User, Session, Election } from '../types';
 import { initialDb } from '../constants';
 import { ERROR_MESSAGES } from '../constants';
+import { generateKey } from '../utils';
 
 interface AppState {
   // Estado de la aplicación
@@ -197,7 +198,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ loading: true, error: '' });
     
     try {
-      const newKey = Math.random().toString(36).substring(2, 7).toUpperCase();
+      const newKey = generateKey();
       await FirestoreService.updateMember(memberId, {
         status: 'Presente',
         key: newKey

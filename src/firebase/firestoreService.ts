@@ -9,7 +9,8 @@ import {
   where,
   onSnapshot,
   writeBatch,
-  Timestamp
+  Timestamp,
+  waitForPendingWrites,
 } from 'firebase/firestore';
 import { db } from './config';
 import bcrypt from 'bcryptjs';
@@ -63,6 +64,13 @@ export interface FirestoreVote {
   selections: string[];
   createdAt?: Timestamp;
 }
+
+/** Escritura local aplicada pero el servidor no confirmó a tiempo (p. ej. red inestable). */
+export const VOTE_CONFIRM_TIMEOUT_ERROR = 'VOTE_CONFIRM_TIMEOUT';
+/** Falta sessionId en el payload del voto. */
+export const VOTE_MISSING_SESSION_ERROR = 'MISSING_SESSION_ID';
+
+const VOTE_SERVER_CONFIRM_MS = 25_000;
 
 // Servicios de Firestore
 export class FirestoreService {
@@ -374,6 +382,10 @@ export class FirestoreService {
   // === VOTOS ===
   static async castVote(vote: Omit<FirestoreVote, 'id' | 'createdAt'>) {
     try {
+      if (!vote.sessionId || String(vote.sessionId).trim() === '') {
+        throw new Error(VOTE_MISSING_SESSION_ERROR);
+      }
+
       // Primero, verificar si ya existe un voto para esta combinación
       const q = query(
         collection(db, 'votes'), 
@@ -384,12 +396,19 @@ export class FirestoreService {
       const existingVotes = await getDocs(q);
       
       if (!existingVotes.empty) {
-        // Actualizar voto existente
+        // Actualizar voto existente (incluye sessionId por si un documento antiguo quedó mal etiquetado)
         const existingVoteDoc = existingVotes.docs[0];
         await updateDoc(existingVoteDoc.ref, {
           selections: vote.selections,
+          sessionId: vote.sessionId,
           createdAt: Timestamp.now()
         });
+        await Promise.race([
+          waitForPendingWrites(db),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(VOTE_CONFIRM_TIMEOUT_ERROR)), VOTE_SERVER_CONFIRM_MS);
+          }),
+        ]);
         return existingVoteDoc.id;
       } else {
         // Crear nuevo voto
@@ -397,6 +416,12 @@ export class FirestoreService {
           ...vote,
           createdAt: Timestamp.now()
         });
+        await Promise.race([
+          waitForPendingWrites(db),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(VOTE_CONFIRM_TIMEOUT_ERROR)), VOTE_SERVER_CONFIRM_MS);
+          }),
+        ]);
         return docRef.id;
       }
     } catch (error) {
@@ -426,14 +451,18 @@ export class FirestoreService {
     }
   }
 
-  static async getVotesByVoter(voterKey: string) {
+  static async getVotesByVoter(voterKey: string, sessionId: string) {
     try {
-      const q = query(collection(db, 'votes'), where('voterKey', '==', voterKey));
+      const q = query(
+        collection(db, 'votes'),
+        where('voterKey', '==', voterKey),
+        where('sessionId', '==', sessionId)
+      );
       const querySnapshot = await getDocs(q);
       const votes: { [electionId: string]: string[] } = {};
       
-      querySnapshot.forEach((doc) => {
-        const vote = doc.data() as FirestoreVote;
+      querySnapshot.forEach((docSnap) => {
+        const vote = docSnap.data() as FirestoreVote;
         votes[vote.electionId] = vote.selections;
       });
       

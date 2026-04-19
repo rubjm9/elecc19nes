@@ -1,8 +1,14 @@
 
+/** Alfabeto sin 0, O ni Q para evitar confusiones al dictar o leer credenciales (solo ASCII; no incluye ñ). */
+const VOTER_KEY_ALPHABET = '123456789ABCDEFGHIJKLMNPRSTUVWXYZ';
 
 // Generar clave única de 5 caracteres
 export const generateKey = (): string => {
-  return Math.random().toString(36).substring(2, 7).toUpperCase();
+  let out = '';
+  for (let i = 0; i < 5; i++) {
+    out += VOTER_KEY_ALPHABET[Math.floor(Math.random() * VOTER_KEY_ALPHABET.length)];
+  }
+  return out;
 };
 
 // Generar ID único para elementos
@@ -74,33 +80,7 @@ export const getStatusColor = (status: string): string => {
   }
 };
 
-/** Ordenar elecciones: por electionOrder si existe, sino por createdAt (cronológico). */
-export const getElectionsOrdered = <T extends { id?: string; createdAt?: { toMillis?: () => number } }>(
-  elections: { [key: string]: T },
-  electionOrder?: string[] | null
-): T[] => {
-  const list = Object.values(elections);
-  if (!list.length) return [];
-  if (electionOrder && electionOrder.length > 0) {
-    const orderSet = new Set(electionOrder);
-    const byOrder: T[] = [];
-    electionOrder.forEach((id) => {
-      if (elections[id]) byOrder.push(elections[id]);
-    });
-    const rest = list.filter((e) => !orderSet.has(e.id || ''));
-    const byCreated = rest.sort((a, b) => {
-      const ta = a.createdAt?.toMillis?.() ?? 0;
-      const tb = b.createdAt?.toMillis?.() ?? 0;
-      return ta - tb;
-    });
-    return [...byOrder, ...byCreated];
-  }
-  return list.sort((a, b) => {
-    const ta = a.createdAt?.toMillis?.() ?? 0;
-    const tb = b.createdAt?.toMillis?.() ?? 0;
-    return ta - tb;
-  });
-};
+export { getElectionsOrdered } from './electionOrdering';
 
 // Validar selecciones de voto
 export const validateVoteSelections = (selections: string[]): { isValid: boolean; error?: string } => {
@@ -121,3 +101,13 @@ export const validateVoteSelections = (selections: string[]): { isValid: boolean
   
   return { isValid: true };
 };
+
+export {
+  getCandidateNamesForElectionTally,
+  getBallotBaseMembers,
+  getElectionVoteArrays,
+  getElectedNamesForClosedElection,
+  getExcludedNamesForElection,
+  voteSelectionsConflictWithExcluded,
+} from './sessionElectedExclusions';
+export type { MemberForElectionTally, ElectionForExclusion, SessionVotesMap } from './sessionElectedExclusions';

@@ -1,7 +1,26 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { FirestoreService } from './firebase/firestoreService';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import {
+  FirestoreService,
+  VOTE_CONFIRM_TIMEOUT_ERROR,
+  VOTE_MISSING_SESSION_ERROR,
+} from './firebase/firestoreService';
 import { useRealtimeVotes, useRealtimeSession, useRealtimeSessions } from './hooks/useRealtimeData';
-import { getElectionsOrdered } from './utils';
+import {
+  generateKey,
+  getElectionsOrdered,
+  getVoteText,
+  getBallotBaseMembers,
+  getExcludedNamesForElection,
+  getCandidateNamesForElectionTally,
+  getElectionVoteArrays,
+  voteSelectionsConflictWithExcluded,
+} from './utils';
+import {
+  tallyElectionVotes,
+  computeTiebreakFromSorted,
+  electedSummaryText,
+  tiebreakerElectionName,
+} from './utils/electionResults';
 import { VoterSessionView } from './components/VoterSessionView';
 import { ConfirmDeleteModal, Modal, NavigationButton } from './components/ui';
 import type { 
@@ -91,6 +110,7 @@ interface SessionManagementProps {
 interface BallotPageProps {
   session: Session;
   election: Election;
+  votes: Database['votes'];
   voterKey: string;
   previousVotes: string[];
   onVote: (key: string, sessionId: string, electionId: string, selections: string[]) => void;
@@ -287,7 +307,7 @@ export default function App() {
         setCurrentSessionId(memberData.sessionId); 
         
         // Cargar votos del votante
-        const voterVotes = await FirestoreService.getVotesByVoter(key);
+        const voterVotes = await FirestoreService.getVotesByVoter(key, memberData.sessionId);
         
         // Asegurar que la sesión tenga los datos completos (miembros y elecciones)
         if (memberData.sessionId && !db.sessions[memberData.sessionId]) {
@@ -384,7 +404,6 @@ export default function App() {
   const createSession = async (sessionName: string, membersList: string) => {
     try {
       setLoading(true);
-      const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
       const names = new Set<string>();
       let duplicates: string[] = [];
       
@@ -457,7 +476,6 @@ export default function App() {
   const addMembersToSession = async (sessionId: string, membersList: string) => {
     try {
       setLoading(true);
-      const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
       const existingNames = new Set(db.sessions[sessionId].members.map((m: Member) => m.name.toLowerCase()));
       let duplicates: string[] = [];
       
@@ -526,7 +544,6 @@ export default function App() {
       // La credencial es permanente y se asigna al crear el miembro; solo actualizar estado (o asignar key si falta por datos antiguos)
       const updates: { status: 'Presente'; key?: string } = { status: 'Presente' };
       if (!member.key || member.key === '') {
-        const generateKey = (): string => Math.random().toString(36).substring(2, 7).toUpperCase();
         updates.key = generateKey();
       }
       await FirestoreService.updateMember(memberId, updates);
@@ -721,6 +738,28 @@ export default function App() {
   
   const castVote = async (key: string, sessionId: string, electionId: string, selections: string[]) => {
     try {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setError('No hay conexión. Conéctate a internet para emitir el voto.');
+        return;
+      }
+      const session = db.sessions[sessionId];
+      if (session) {
+        const excluded = getExcludedNamesForElection(
+          {
+            ...session,
+            id: sessionId,
+            elections: session.elections,
+            members: session.members,
+            electionOrder: session.electionOrder,
+          },
+          electionId,
+          db.votes
+        );
+        if (voteSelectionsConflictWithExcluded(selections, excluded)) {
+          setError('No puedes votar por una persona ya elegida en una votación anterior de esta sesión.');
+          return;
+        }
+      }
       setLoading(true);
       await FirestoreService.castVote({
         voterKey: key,
@@ -729,7 +768,7 @@ export default function App() {
         selections
       });
 
-      // Actualizar estado local
+      // Actualizar estado local solo tras confirmación en servidor (waitForPendingWrites dentro de castVote)
       setDb((prev: Database) => { 
         const newDb = JSON.parse(JSON.stringify(prev)); 
         if (!newDb.votes[key]) newDb.votes[key] = {}; 
@@ -740,7 +779,14 @@ export default function App() {
     setPage('voteSuccess');
     } catch (error) {
       console.error('Error casting vote:', error);
-      setError('Error al emitir el voto');
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === VOTE_CONFIRM_TIMEOUT_ERROR) {
+        setError('No se ha podido confirmar con el servidor; comprueba la conexión e inténtalo de nuevo.');
+      } else if (msg === VOTE_MISSING_SESSION_ERROR) {
+        setError('Error al asociar el voto a la sesión. Vuelve a iniciar sesión e inténtalo de nuevo.');
+      } else {
+        setError('Error al emitir el voto');
+      }
     } finally {
       setLoading(false);
     }
@@ -843,7 +889,17 @@ export default function App() {
         if (!electionForBallot) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
         const votesForVoter = db.votes[voterKey] || {};
         const previousVotesForElection = votesForVoter[currentElectionId] || [];
-        return <BallotPage session={sessionForBallot} election={electionForBallot} voterKey={voterKey} previousVotes={previousVotesForElection} onVote={castVote} onBack={() => setPage('voterSession')} />;
+        return (
+          <BallotPage
+            session={{ ...sessionForBallot, id: currentSessionId }}
+            election={electionForBallot}
+            votes={db.votes}
+            voterKey={voterKey}
+            previousVotes={previousVotesForElection}
+            onVote={castVote}
+            onBack={() => setPage('voterSession')}
+          />
+        );
       case 'voteSuccess': return <VoteSuccessPage onBackToSession={() => { setCurrentElectionId(null); setPage('voterSession'); }} onExit={() => { setVoterKey(null); setCurrentSessionId(null); setPage('home'); }} />;
       case 'voterResults':
         if (!currentSessionId || !currentElectionId || !voterKey || !db.sessions[currentSessionId]) return <HomePage onLogin={handleVoterLogin} onAdminClick={() => setPage('adminLogin')} error={error} />;
@@ -1175,19 +1231,48 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
     const resultsData = useMemo(() => {
         if (!electionDetail || electionDetail.view !== 'results' || !session || !detailElection) return null;
         const election = detailElection;
-        const electionVoterKeys = new Set(session.members.map((v: Member) => v.key));
-        const electionVotes = Object.entries(votes).filter(([key]) => electionVoterKeys.has(key)).map(([, userVotes]: [string, { [electionId: string]: string[] }]) => election.id ? userVotes[election.id] : undefined).filter(Boolean);
+        const electionVotes = getElectionVoteArrays(election.id, votes, session.members);
         const papeletasEmitidas = electionVotes.length;
         const totalPapeletas = session.members.filter((m: Member) => m.status === 'Presente').length;
-        const candidatesForResults = election.candidates || session.members.filter((m: Member) => m.status === 'Presente').map((m: Member) => m.name);
-        const results: { [name: string]: number } = {};
-        candidatesForResults.forEach((name: string) => { results[name] = 0; });
-        electionVotes.forEach((voteList) => { if (Array.isArray(voteList)) voteList.forEach((name: string) => { if (results.hasOwnProperty(name)) results[name]++; }); });
-        const sortedResults = Object.entries(results).sort(([, a], [, b]) => (b as number) - (a as number));
-        const maxVotes = sortedResults.length > 0 ? (sortedResults[0][1] as number) : 0;
-        const getVoteText = (count: number) => count === 1 ? '1 voto' : `${count} votos`;
-        return { papeletasEmitidas, totalPapeletas, sortedResults, maxVotes, getVoteText };
+        const candidatesForResults = getCandidateNamesForElectionTally(election, session.members);
+        const { sortedResults, maxVotes } = tallyElectionVotes(candidatesForResults, electionVotes);
+        const { electedEntries, tiedCandidates, tiebreakerPositions, tiedVoteCount } = computeTiebreakFromSorted(
+          sortedResults,
+          election.positionsToElect
+        );
+        const electedText = electedSummaryText(electedEntries);
+        const tiebreakerElection = session.elections
+          ? Object.values(session.elections).find((e: Election) => e.name === tiebreakerElectionName(election.name))
+          : undefined;
+        return {
+          papeletasEmitidas,
+          totalPapeletas,
+          sortedResults,
+          maxVotes,
+          electedEntries,
+          tiedCandidates,
+          tiebreakerPositions,
+          tiedVoteCount,
+          electedText,
+          tiebreakerElection,
+          positionsToElect: election.positionsToElect,
+        };
     }, [electionDetail, session, votes, detailElection]);
+
+    const createPanelTiebreaker = useCallback(() => {
+        if (!resultsData || !onAddElection || !session.id || !detailElection) return;
+        if (resultsData.tiedCandidates.length === 0) return;
+        const desc = `Votación de desempate para ${resultsData.tiebreakerPositions} puesto(s). Candidatos: ${resultsData.tiedCandidates.join(', ')}.`;
+        onAddElection(session.id, {
+          name: tiebreakerElectionName(detailElection.name),
+          description: desc,
+          positionsToElect: resultsData.tiebreakerPositions,
+          status: 'Prevista',
+          candidates: resultsData.tiedCandidates,
+          sessionId: session.id,
+        });
+        closeDetailPanel();
+    }, [resultsData, onAddElection, session.id, detailElection, closeDetailPanel]);
 
     return ( <>
         <Modal isOpen={isCloseModalOpen} onClose={() => setCloseModalOpen(false)} title="Confirmar cierre">
@@ -1262,10 +1347,27 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
                         <div className="text-sm text-slate-500">Papeletas emitidas</div>
                       </div>
                     </div>
+                    <div className="mt-4 mb-4 space-y-2">
+                      {resultsData.electedEntries.length > 0 || resultsData.tiedCandidates.length > 0 ? (
+                        <>
+                          {resultsData.electedEntries.length > 0 && (
+                            <p className="text-slate-800"><span className="font-semibold">Los primeros {resultsData.positionsToElect}:</span> {resultsData.electedText}{resultsData.tiedCandidates.length === 0 ? '.' : ''}</p>
+                          )}
+                          {resultsData.tiedCandidates.length > 0 && (
+                            <p className="text-slate-800 font-semibold">Empate para los {resultsData.tiebreakerPositions} puesto(s) restantes entre {resultsData.tiedCandidates.join(', ')} con {getVoteText(resultsData.tiedVoteCount)}.</p>
+                          )}
+                        </>
+                      ) : null}
+                    </div>
+                    {resultsData.tiedCandidates.length > 0 && !resultsData.tiebreakerElection && (
+                      <div className="my-4">
+                        <button type="button" onClick={createPanelTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button>
+                      </div>
+                    )}
                     <div className="space-y-3">
                       {resultsData.sortedResults.map(([name, count], index) => (
                         <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                          <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{resultsData.getVoteText(count)}</span></div>
+                          <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div>
                           <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: resultsData.maxVotes > 0 ? `${(count / resultsData.maxVotes) * 100}%` : '0%' }} /></div>
                         </div>
                       ))}
@@ -1381,10 +1483,27 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
                             <div className="text-sm text-slate-500">Papeletas emitidas</div>
                           </div>
                         </div>
+                        <div className="mt-4 mb-4 space-y-2">
+                          {resultsData.electedEntries.length > 0 || resultsData.tiedCandidates.length > 0 ? (
+                            <>
+                              {resultsData.electedEntries.length > 0 && (
+                                <p className="text-slate-800"><span className="font-semibold">Los primeros {resultsData.positionsToElect}:</span> {resultsData.electedText}{resultsData.tiedCandidates.length === 0 ? '.' : ''}</p>
+                              )}
+                              {resultsData.tiedCandidates.length > 0 && (
+                                <p className="text-slate-800 font-semibold">Empate para los {resultsData.tiebreakerPositions} puesto(s) restantes entre {resultsData.tiedCandidates.join(', ')} con {getVoteText(resultsData.tiedVoteCount)}.</p>
+                              )}
+                            </>
+                          ) : null}
+                        </div>
+                        {resultsData.tiedCandidates.length > 0 && !resultsData.tiebreakerElection && (
+                          <div className="my-4">
+                            <button type="button" onClick={createPanelTiebreaker} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg">Crear votación de desempate</button>
+                          </div>
+                        )}
                         <div className="space-y-3 overflow-y-auto scroll-list pr-2">
                           {resultsData.sortedResults.map(([name, count], index) => (
                             <div key={name} className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                              <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{resultsData.getVoteText(count)}</span></div>
+                              <div className="flex justify-between items-center text-slate-800"><span className="font-semibold">{index + 1}. {name}</span><span className="font-bold text-cyan-600">{getVoteText(count)}</span></div>
                               <div className="w-full bg-slate-200 rounded-full h-2.5 mt-2"><div className="bg-cyan-500 h-2.5 rounded-full transition-[width] duration-300 ease-out motion-reduce:duration-0" style={{ width: resultsData.maxVotes > 0 ? `${(count / resultsData.maxVotes) * 100}%` : '0%' }} /></div>
                             </div>
                           ))}
@@ -1401,13 +1520,105 @@ function SessionManagement({ session: initialSession, votes: initialVotes, onAcc
 
 // VoterSessionView ahora se importa desde ./components/VoterSessionView
 
-function BallotPage({ session, election, voterKey, previousVotes, onVote, onBack }: BallotPageProps) {
+function BallotPage({ session, election, votes, voterKey, previousVotes, onVote, onBack }: BallotPageProps) {
     const [selections, setSelections] = useState<string[]>(previousVotes);
     const [error, setError] = useState<string>('');
     useEffect(() => { if (selections.length === 0) setSelections(Array(election.positionsToElect).fill('')); }, [election.positionsToElect, selections.length]);
-    const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); setError(''); if (selections.some((s: string) => s === '')) { setError('Debes seleccionar un candidato para cada puesto.'); return; } const uniqueSelections = new Set(selections.filter((s: string) => s !== '')); if (uniqueSelections.size !== selections.filter((s: string) => s !== '').length) { setError('No puedes votar por la misma persona más de una vez.'); return; } if (session.id && election.id) onVote(voterKey, session.id, election.id, selections); };
-    const candidates = election.candidates ? session.members.filter((m: Member) => election.candidates!.includes(m.name)) : session.members.filter((m: Member) => m.status === 'Presente' && m.isEligible);
-    return ( <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200"> <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a la sesión</NavigationButton> <h2 className="text-2xl font-bold mb-2 text-cyan-700">{election.name}</h2> <p className="text-slate-500 mb-4 italic">{election.description}</p> {previousVotes.length > 0 && (<div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-r-lg"><p className="font-bold">Ya has votado en esta elección.</p><p className="text-sm">Puedes modificar tu voto hasta que se cierre la votación.</p></div>)} <p className="text-slate-500 mb-6">Debes elegir a {election.positionsToElect} persona(s).</p> <form onSubmit={handleSubmit} className="flex flex-col gap-4"> {[...Array(election.positionsToElect)].map((_, index) => ( <div key={index}> <label className="block text-sm font-medium text-slate-600 mb-1">Voto {index + 1}</label> <select value={selections[index] || ''} onChange={e => {const newS = [...selections]; newS[index] = e.target.value; setSelections(newS);}} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3"> <option value="" disabled>Selecciona una persona...</option> {candidates.map(c => <option key={c.id} value={c.name}>{c.name}</option>)} </select> </div> ))} {error && <div role="alert"><p className="text-red-500 mt-4 text-center">{error}</p></div>} <button type="submit" className="mt-4 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg shadow-md">{previousVotes.length > 0 ? 'Modificar papeleta' : 'Emitir mi voto'}</button> </form> </div> );
+
+    const excluded = useMemo(() => {
+        if (!session.id || !election.id) return new Set<string>();
+        return getExcludedNamesForElection(session, election.id, votes);
+    }, [session, election.id, votes]);
+
+    const baseMembers = useMemo(
+        () => getBallotBaseMembers(session.members, election),
+        [session.members, election]
+    );
+
+    const candidates = useMemo(
+        () => baseMembers.filter((m: Member) => !excluded.has(m.name)),
+        [baseMembers, excluded]
+    );
+
+    const cannotCompleteBallot = candidates.length < election.positionsToElect;
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+        if (cannotCompleteBallot) {
+            setError('No hay suficientes candidatos elegibles para completar esta votación.');
+            return;
+        }
+        if (selections.some((s: string) => s === '')) {
+            setError('Debes seleccionar un candidato para cada puesto.');
+            return;
+        }
+        const uniqueSelections = new Set(selections.filter((s: string) => s !== ''));
+        if (uniqueSelections.size !== selections.filter((s: string) => s !== '').length) {
+            setError('No puedes votar por la misma persona más de una vez.');
+            return;
+        }
+        if (voteSelectionsConflictWithExcluded(selections, excluded)) {
+            setError('No puedes votar por una persona ya elegida en una votación anterior de esta sesión.');
+            return;
+        }
+        if (session.id && election.id) onVote(voterKey, session.id, election.id, selections);
+    };
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-xl border border-slate-200">
+            <NavigationButton onClick={onBack} variant="back" className="mb-4">Volver a la sesión</NavigationButton>
+            <h2 className="text-2xl font-bold mb-2 text-cyan-700">{election.name}</h2>
+            <p className="text-slate-500 mb-4 italic">{election.description}</p>
+            {cannotCompleteBallot && (
+                <div role="alert" className="bg-orange-50 border-l-4 border-orange-500 text-orange-900 p-4 mb-6 rounded-r-lg">
+                    <p className="font-bold">No se puede completar la papeleta</p>
+                    <p className="text-sm mt-1">Hay {candidates.length} candidato(s) elegible(s) y se requieren {election.positionsToElect} puesto(s). Quien ya ha resultado elegido en una votación anterior de esta sesión no puede volver a figurar como candidato.</p>
+                </div>
+            )}
+            {previousVotes.length > 0 && (
+                <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-r-lg">
+                    <p className="font-bold">Ya has votado en esta elección.</p>
+                    <p className="text-sm">Puedes modificar tu voto hasta que se cierre la votación.</p>
+                </div>
+            )}
+            <p className="text-slate-500 mb-6">Debes elegir a {election.positionsToElect} persona(s).</p>
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                {[...Array(election.positionsToElect)].map((_, index) => (
+                    <div key={index}>
+                        <label className="block text-sm font-medium text-slate-600 mb-1">Voto {index + 1}</label>
+                        <select
+                            value={selections[index] || ''}
+                            onChange={(e) => {
+                                const newS = [...selections];
+                                newS[index] = e.target.value;
+                                setSelections(newS);
+                            }}
+                            disabled={cannotCompleteBallot}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 disabled:opacity-50"
+                        >
+                            <option value="" disabled>Selecciona una persona...</option>
+                            {candidates.map((c: Member) => (
+                                <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                ))}
+                {error && (
+                    <div role="alert">
+                        <p className="text-red-500 mt-4 text-center">{error}</p>
+                    </div>
+                )}
+                <button
+                    type="submit"
+                    disabled={cannotCompleteBallot}
+                    className="mt-4 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white font-bold py-3 rounded-lg shadow-md disabled:opacity-50 disabled:pointer-events-none"
+                >
+                    {previousVotes.length > 0 ? 'Modificar papeleta' : 'Emitir mi voto'}
+                </button>
+            </form>
+        </div>
+    );
 }
 
 function VoteSuccessPage({ onBackToSession, onExit }: VoteSuccessPageProps) { 
@@ -1438,56 +1649,32 @@ function ResultsPage({ session, election, votes: initialVotes, onBack, onAddElec
         return initialVotes;
     }, [session.id, election.id, realtimeVotes, initialVotes]);
 
-    const electionVoterKeys = new Set(sessionMembers.map((v: Member) => v.key));
-    const electionVotes = Object.entries(votes).filter(([key]) => electionVoterKeys.has(key)).map(([, userVotes]: [string, { [electionId: string]: string[] }]) => election.id ? userVotes[election.id] : undefined).filter(Boolean);
+    const electionVotes = getElectionVoteArrays(election.id, votes, sessionMembers);
     const papeletasEmitidas = electionVotes.length;
     const totalPapeletas = sessionMembers.filter((m: Member) => m.status === 'Presente').length;
 
-    const candidatesForResults = election.candidates || sessionMembers.filter((m: Member) => m.status === 'Presente').map((m: Member) => m.name);
-    const results: { [name: string]: number } = {};
-    candidatesForResults.forEach((name: string) => { results[name] = 0; });
-    
-    electionVotes.forEach((voteList) => { if(Array.isArray(voteList)) { voteList.forEach((name: string) => { if (results.hasOwnProperty(name)) results[name]++; }); } });
-    
-    const sortedResults = Object.entries(results).sort(([, a], [, b]) => (b as number) - (a as number));
-    const maxVotes = sortedResults.length > 0 ? (sortedResults[0][1] as number) : 0;
-    const getVoteText = (count: number) => count === 1 ? '1 voto' : `${count} votos`;
-
-    const n = election.positionsToElect;
-    let clearWinners: [string, number][] = [];
-    let tiedCandidates: string[] = [];
-    let tiebreakerPositions = 0;
-    let electedEntries: [string, number][] = [];
-    let tiedVoteCount = 0;
-
-    if (sortedResults.length > 0) {
-      if (sortedResults.length <= n) {
-        electedEntries = sortedResults.map(([name, count]) => [name, count as number]);
-      } else {
-        const cutoffCount = sortedResults[n - 1][1] as number;
-        clearWinners = sortedResults.filter(([, c]) => (c as number) > cutoffCount);
-        const tiedAtCutoff = sortedResults.filter(([, c]) => (c as number) === cutoffCount);
-        const positionsRemaining = n - clearWinners.length;
-        const needTiebreaker = tiedAtCutoff.length > positionsRemaining;
-        if (needTiebreaker) {
-          tiedCandidates = tiedAtCutoff.map(([name]) => name);
-          tiebreakerPositions = positionsRemaining;
-          electedEntries = clearWinners.map(([name, count]) => [name, count as number]);
-          tiedVoteCount = cutoffCount;
-        } else {
-          electedEntries = sortedResults.slice(0, n).map(([name, count]) => [name, count as number]);
-        }
-      }
-    }
-
-    const electedText = electedEntries.map(([name, count]) => `${name} (${getVoteText(count)})`).join(', ');
-
-    const tiebreakerElection = session.elections ? Object.values(session.elections).find((e: Election) => e.name === `Desempate: ${election.name}`) : undefined;
+    const candidatesForResults = getCandidateNamesForElectionTally(election, sessionMembers);
+    const { sortedResults, maxVotes } = tallyElectionVotes(candidatesForResults, electionVotes);
+    const { electedEntries, tiedCandidates, tiebreakerPositions, tiedVoteCount } = computeTiebreakFromSorted(
+      sortedResults,
+      election.positionsToElect
+    );
+    const electedText = electedSummaryText(electedEntries);
+    const tiebreakerElection = session.elections
+      ? Object.values(session.elections).find((e: Election) => e.name === tiebreakerElectionName(election.name))
+      : undefined;
 
     const createTiebreaker = () => {
         if (!onAddElection || tiedCandidates.length === 0) return;
         const desc = `Votación de desempate para ${tiebreakerPositions} puesto(s). Candidatos: ${tiedCandidates.join(', ')}.`;
-        const tiebreakerElectionData = { name: `Desempate: ${election.name}`, description: desc, positionsToElect: tiebreakerPositions, status: 'Prevista' as const, candidates: tiedCandidates, sessionId: session.id! };
+        const tiebreakerElectionData = {
+          name: tiebreakerElectionName(election.name),
+          description: desc,
+          positionsToElect: tiebreakerPositions,
+          status: 'Prevista' as const,
+          candidates: tiedCandidates,
+          sessionId: session.id!,
+        };
         if (session.id) onAddElection(session.id, tiebreakerElectionData);
         onBack();
     };
