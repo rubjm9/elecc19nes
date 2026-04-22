@@ -116,6 +116,9 @@ export function getExcludedNamesForElection(
   const allElections = Object.values(session.elections);
   const idx = ordered.findIndex((e) => e.id === currentElectionId);
   const excluded = new Set<string>();
+  // #region agent log
+  fetch('http://127.0.0.1:7762/ingest/79eb99af-09cb-4da2-85b2-df73f449f503',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7f1785'},body:JSON.stringify({sessionId:'7f1785',runId:'run1',hypothesisId:'H1',location:'src/utils/sessionElectedExclusions.ts:getExcludedNamesForElection:init',message:'Computed election order and index',data:{currentElectionId,idx,electionOrder:session.electionOrder??null,ordered:ordered.map((e)=>({id:e.id,name:e.name,status:e.status,positionsToElect:e.positionsToElect,candidatesCount:Array.isArray(e.candidates)?e.candidates.length:null}))},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   if (idx <= 0) return excluded;
 
   for (let i = 0; i < idx; i++) {
@@ -126,6 +129,9 @@ export function getExcludedNamesForElection(
       }
     }
   }
+  // #region agent log
+  fetch('http://127.0.0.1:7762/ingest/79eb99af-09cb-4da2-85b2-df73f449f503',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7f1785'},body:JSON.stringify({sessionId:'7f1785',runId:'run1',hypothesisId:'H2',location:'src/utils/sessionElectedExclusions.ts:getExcludedNamesForElection:result',message:'Final excluded names set',data:{currentElectionId,excluded:[...excluded]},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   return excluded;
 }
 
@@ -134,4 +140,15 @@ export function voteSelectionsConflictWithExcluded(
   excluded: Set<string>
 ): boolean {
   return selections.some((s) => s !== '' && excluded.has(s));
+}
+
+/** True si alguna selección coincide con un nombre ya elegido en elecciones anteriores de la sesión. */
+export function voteSelectionsConflictWithPriorSessionElected(
+  session: Parameters<typeof getExcludedNamesForElection>[0],
+  currentElectionId: string,
+  votes: SessionVotesMap,
+  selections: string[]
+): boolean {
+  const excluded = getExcludedNamesForElection(session, currentElectionId, votes);
+  return voteSelectionsConflictWithExcluded(selections, excluded);
 }

@@ -61,10 +61,7 @@ export const calculateVoteProgress = (votesCount: number, totalVoters: number): 
   return Math.round((votesCount / totalVoters) * 100);
 };
 
-// Obtener texto de voto
-export const getVoteText = (count: number): string => {
-  return count === 1 ? '1 voto' : `${count} votos`;
-};
+export { getVoteText } from './voteText';
 
 // Obtener color de estado
 export const getStatusColor = (status: string): string => {
@@ -109,5 +106,6 @@ export {
   getElectedNamesForClosedElection,
   getExcludedNamesForElection,
   voteSelectionsConflictWithExcluded,
+  voteSelectionsConflictWithPriorSessionElected,
 } from './sessionElectedExclusions';
 export type { MemberForElectionTally, ElectionForExclusion, SessionVotesMap } from './sessionElectedExclusions';

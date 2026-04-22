@@ -1,4 +1,4 @@
-import { getVoteText } from './index';
+import { getVoteText } from './voteText';
 
 export type RankedEntry = [string, number];
 

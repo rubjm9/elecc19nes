@@ -4,6 +4,7 @@ import {
   getExcludedNamesForElection,
   getElectedNamesForClosedElection,
   getCandidateNamesForElectionTally,
+  voteSelectionsConflictWithPriorSessionElected,
 } from './sessionElectedExclusions';
 import type { ElectionForExclusion, MemberForElectionTally, SessionVotesMap } from './sessionElectedExclusions';
 
@@ -143,5 +144,67 @@ describe('getElectedNamesForClosedElection con desempate', () => {
     };
     const names = getElectedNamesForClosedElection(parent, votes, members, allElections);
     expect(names).toContain('B');
+  });
+});
+
+describe('voteSelectionsConflictWithPriorSessionElected', () => {
+  it('detecta conflicto con lista explícita de candidatos en la elección actual', () => {
+    const members = [
+      member({ key: 'k1', name: 'Ana' }),
+      member({ key: 'k2', name: 'Bea' }),
+    ];
+    const e1: ElectionForExclusion = {
+      id: 'e1',
+      name: 'Primera',
+      status: 'Cerrada',
+      positionsToElect: 1,
+    };
+    const e2: ElectionForExclusion = {
+      id: 'e2',
+      name: 'Segunda',
+      status: 'Abierta',
+      positionsToElect: 1,
+      candidates: ['Ana', 'Bea'],
+    };
+    const session = {
+      elections: { e1, e2 },
+      members,
+      electionOrder: ['e1', 'e2'],
+    };
+    const votes: SessionVotesMap = {
+      k1: { e1: ['Ana'] },
+      k2: { e1: ['Ana'] },
+    };
+    expect(voteSelectionsConflictWithPriorSessionElected(session, 'e2', votes, ['Ana'])).toBe(true);
+    expect(voteSelectionsConflictWithPriorSessionElected(session, 'e2', votes, ['Bea'])).toBe(false);
+  });
+
+  it('excluye a los dos elegidos cuando positionsToElect es 2', () => {
+    const members = [
+      member({ key: 'a', name: 'Uno' }),
+      member({ key: 'b', name: 'Dos' }),
+      member({ key: 'c', name: 'Tres' }),
+    ];
+    const e1: ElectionForExclusion = {
+      id: 'e1',
+      name: 'Junta',
+      status: 'Cerrada',
+      positionsToElect: 2,
+    };
+    const e2: ElectionForExclusion = { id: 'e2', name: 'Otro cargo', status: 'Abierta', positionsToElect: 1 };
+    const session = {
+      elections: { e1, e2 },
+      members,
+      electionOrder: ['e1', 'e2'],
+    };
+    const votes: SessionVotesMap = {
+      a: { e1: ['Uno', 'Dos'] },
+      b: { e1: ['Uno', 'Dos'] },
+      c: { e1: ['Uno', 'Dos'] },
+    };
+    const ex = getExcludedNamesForElection(session, 'e2', votes);
+    expect([...ex].sort()).toEqual(['Dos', 'Uno']);
+    expect(voteSelectionsConflictWithPriorSessionElected(session, 'e2', votes, ['Uno'])).toBe(true);
+    expect(voteSelectionsConflictWithPriorSessionElected(session, 'e2', votes, ['Tres'])).toBe(false);
   });
 });

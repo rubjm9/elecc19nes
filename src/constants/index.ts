@@ -40,6 +40,8 @@ export const ERROR_MESSAGES = {
   SESSION_CREATION_ERROR: 'Error al crear la sesión',
   ELECTION_CREATION_ERROR: 'Error al crear la elección',
   VOTE_ERROR: 'Error al emitir el voto',
+  VOTE_PRIOR_SESSION_ELECTED_CONFLICT:
+    'No puedes votar por una persona ya elegida en una votación anterior de esta sesión.',
   ADMIN_CREATION_ERROR: 'Error al crear administrador',
   ADMIN_DELETION_ERROR: 'Error al eliminar administrador',
   MEMBER_ACCREDITATION_ERROR: 'Error al acreditar al miembro',

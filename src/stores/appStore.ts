@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { FirestoreService } from '../firebase/firestoreService';
 import type { Database, User, Session, Election } from '../types';
-import { initialDb } from '../constants';
-import { ERROR_MESSAGES } from '../constants';
+import { initialDb, ERROR_MESSAGES } from '../constants';
 import { generateKey } from '../utils';
+import { voteSelectionsConflictWithPriorSessionElected } from '../utils/sessionElectedExclusions';
 
 interface AppState {
   // Estado de la aplicación
@@ -236,11 +236,31 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Acciones de voto
   submitVote: async (electionId: string, selections: string[]) => {
-    const { currentSession, voterKey } = get();
+    const { currentSession, voterKey, db } = get();
     if (!currentSession?.id || !voterKey) return false;
-    
+
+    const sessionFull = db.sessions[currentSession.id];
+    if (
+      sessionFull &&
+      voteSelectionsConflictWithPriorSessionElected(
+        {
+          ...sessionFull,
+          id: currentSession.id,
+          elections: sessionFull.elections,
+          members: sessionFull.members,
+          electionOrder: sessionFull.electionOrder,
+        },
+        electionId,
+        db.votes,
+        selections
+      )
+    ) {
+      set({ error: ERROR_MESSAGES.VOTE_PRIOR_SESSION_ELECTED_CONFLICT, loading: false });
+      return false;
+    }
+
     set({ loading: true, error: '' });
-    
+
     try {
       await FirestoreService.castVote({
         voterKey,

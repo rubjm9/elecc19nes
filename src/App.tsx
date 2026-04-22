@@ -5,6 +5,7 @@ import {
   VOTE_MISSING_SESSION_ERROR,
 } from './firebase/firestoreService';
 import { useRealtimeVotes, useRealtimeSession, useRealtimeSessions } from './hooks/useRealtimeData';
+import { ERROR_MESSAGES } from './constants';
 import {
   generateKey,
   getElectionsOrdered,
@@ -13,7 +14,7 @@ import {
   getExcludedNamesForElection,
   getCandidateNamesForElectionTally,
   getElectionVoteArrays,
-  voteSelectionsConflictWithExcluded,
+  voteSelectionsConflictWithPriorSessionElected,
 } from './utils';
 import {
   tallyElectionVotes,
@@ -743,8 +744,9 @@ export default function App() {
         return;
       }
       const session = db.sessions[sessionId];
-      if (session) {
-        const excluded = getExcludedNamesForElection(
+      if (
+        session &&
+        voteSelectionsConflictWithPriorSessionElected(
           {
             ...session,
             id: sessionId,
@@ -753,12 +755,12 @@ export default function App() {
             electionOrder: session.electionOrder,
           },
           electionId,
-          db.votes
-        );
-        if (voteSelectionsConflictWithExcluded(selections, excluded)) {
-          setError('No puedes votar por una persona ya elegida en una votación anterior de esta sesión.');
-          return;
-        }
+          db.votes,
+          selections
+        )
+      ) {
+        setError(ERROR_MESSAGES.VOTE_PRIOR_SESSION_ELECTED_CONFLICT);
+        return;
       }
       setLoading(true);
       await FirestoreService.castVote({
@@ -1540,6 +1542,13 @@ function BallotPage({ session, election, votes, voterKey, previousVotes, onVote,
         [baseMembers, excluded]
     );
 
+    useEffect(() => {
+        if (!session.id || !election.id) return;
+        // #region agent log
+        fetch('http://127.0.0.1:7762/ingest/79eb99af-09cb-4da2-85b2-df73f449f503',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7f1785'},body:JSON.stringify({sessionId:'7f1785',runId:'run1',hypothesisId:'H3',location:'src/App.tsx:BallotPage:candidates',message:'Ballot candidate filtering snapshot',data:{sessionId:session.id,electionId:election.id,electionName:election.name,positionsToElect:election.positionsToElect,electionCandidates:Array.isArray(election.candidates)?election.candidates:[],baseMembers:baseMembers.map((m: Member)=>m.name),excluded:[...excluded],finalCandidates:candidates.map((m: Member)=>m.name)},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+    }, [session.id, election.id, election.name, election.positionsToElect, election.candidates, baseMembers, excluded, candidates]);
+
     const cannotCompleteBallot = candidates.length < election.positionsToElect;
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -1558,8 +1567,14 @@ function BallotPage({ session, election, votes, voterKey, previousVotes, onVote,
             setError('No puedes votar por la misma persona más de una vez.');
             return;
         }
-        if (voteSelectionsConflictWithExcluded(selections, excluded)) {
-            setError('No puedes votar por una persona ya elegida en una votación anterior de esta sesión.');
+        if (
+            election.id &&
+            voteSelectionsConflictWithPriorSessionElected(session, election.id, votes, selections)
+        ) {
+            // #region agent log
+            fetch('http://127.0.0.1:7762/ingest/79eb99af-09cb-4da2-85b2-df73f449f503',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7f1785'},body:JSON.stringify({sessionId:'7f1785',runId:'run1',hypothesisId:'H4',location:'src/App.tsx:BallotPage:handleSubmit',message:'Vote blocked by prior elected exclusion rule',data:{sessionId:session.id??null,electionId:election.id,selections},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+            setError(ERROR_MESSAGES.VOTE_PRIOR_SESSION_ELECTED_CONFLICT);
             return;
         }
         if (session.id && election.id) onVote(voterKey, session.id, election.id, selections);
